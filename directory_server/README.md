@@ -51,24 +51,31 @@ The recommended deployment uses Docker Compose with an isolated network where th
 
 #### Initial Setup
 
-**Important**: The Tor data directory must be created with proper permissions before starting Docker Compose. If not created manually, Docker will create it as root, causing permission errors.
+**Important**: The Tor directories and configuration must be set up with proper permissions before starting Docker Compose. If not created manually, Docker will create them as root, causing permission errors.
 
 ```bash
-# Create required directories with correct permissions
-mkdir -p tor/data tor/run
-sudo chown -R 1000:1000 tor/data tor/run
+# 1. Create directory structure with correct permissions
+mkdir -p tor/conf tor/data tor/run
+chmod 755 tor/conf tor/run
+chmod 700 tor/data
+chown -R 1000:1000 tor/
 
-# Start both directory server and Tor (uses pre-built image)
+# 2. Create Tor configuration file
+cat > tor/conf/torrc << 'EOF'
+# JoinMarket Directory Server Hidden Service
+HiddenServiceDir /var/lib/tor
+HiddenServiceVersion 3
+HiddenServicePort 5222 joinmarket_directory_server:5222
+EOF
+
+# 3. Start both directory server and Tor (uses pre-built image)
 docker compose up -d
 
-# Or build locally instead
-docker compose up -d --build
-
-# View logs
+# 4. View logs
 docker compose logs -f
 
-# Get your onion address (available after first tor startup)
-cat tor/data/jm_directory/hostname
+# 5. Get your onion address (available after first tor startup)
+cat tor/data/hostname
 
 # Stop services
 docker compose down
@@ -76,35 +83,57 @@ docker compose down
 
 By default, docker-compose.yml uses the pre-built image `ghcr.io/m0wer/joinmarket-v2-directory-server:master`. To build locally, uncomment the `build` section and comment out the `image` line in docker-compose.yml.
 
+#### Directory Structure After Setup
+
+```
+directory_server/
+├── tor/
+│   ├── conf/
+│   │   └── torrc                    # Tor config (755, uid 1000)
+│   ├── data/                        # Hidden service keys (700, uid 1000)
+│   │   ├── hostname                 # Your .onion address (auto-generated)
+│   │   ├── hs_ed25519_public_key    # Public key (auto-generated)
+│   │   ├── hs_ed25519_secret_key    # Private key (auto-generated)
+│   │   └── authorized_clients/      # For client auth (optional)
+│   └── run/                         # Tor runtime files (755, uid 1000)
+└── logs/                            # Directory server logs
+```
+
 #### Vanity Onion Address (Optional)
 
 To create a vanity onion address with a custom prefix:
 
 ```bash
-# Generate vanity address (this can take a while depending on prefix length)
+# 1. Generate vanity address (can take hours/days depending on prefix length)
 docker run --rm -it --network none -v $PWD:/keys \
   ghcr.io/cathugger/mkp224o:master -d /keys prefix
 
-# Move generated keys to tor data directory
-mv prefix* tor/data/jm_directory/
-sudo chown -R 1000:1000 tor/data/jm_directory/
+# 2. Move generated keys to tor data directory
+# Note: mkp224o creates a directory named "prefix<randomchars>.onion"
+mv prefix*.onion/hs_ed25519_public_key prefix*.onion/hs_ed25519_secret_key prefix*.onion/hostname tor/data/
 
-# Restart tor to use the new keys
+# 3. Set correct ownership (uid 1000 required by tor container)
+chown -R 1000:1000 tor/data/
+
+# 4. Restart tor to use the new keys
 docker compose restart tor
+
+# 5. Verify your new vanity address
+cat tor/data/hostname
 ```
 
-**Note**: Longer prefixes take exponentially longer to generate. A 5-character prefix may take hours, 6+ characters may take days.
+**Note**: Longer prefixes take exponentially longer to generate. A 5-character prefix may take hours, 6+ characters may take days. The vanity generator will create `hs_ed25519_public_key` and `hs_ed25519_secret_key` files which replace the auto-generated ones.
 
 #### Network Architecture & Security
 
 The Docker Compose setup provides maximum security through network isolation:
 
-- **directory_server**: Runs on isolated internal network (`tor_network`) with **no external internet access**
+- **directory_server**: Runs on isolated internal network (`joinmarket_directory_internal`) with **no external internet access**
   - Cannot make outbound connections to the internet
   - Cannot be reached directly from the internet
   - Only accessible through the Tor hidden service
 - **tor**: Acts as a secure gateway
-  - Connected to both internal network (`tor_network`) and external network
+  - Connected to both internal network (`joinmarket_directory_internal`) and external network (`joinmarket_directory_external`)
   - Forwards hidden service traffic to directory_server on port 5222
   - Provides .onion address for privacy
 
@@ -114,19 +143,7 @@ This architecture ensures:
 - Attack surface is minimized through network isolation
 - Even if the directory server is compromised, it cannot access the internet directly
 
-### Directory Structure
 
-```
-directory_server/
-├── tor/
-│   ├── conf/
-│   │   └── torrc          # Tor configuration
-│   ├── data/              # Hidden service keys (generated on first run)
-│   │   └── jm_directory/
-│   │       └── hostname   # Your .onion address
-│   └── run/               # Tor runtime files
-└── logs/                  # Directory server logs
-```
 
 ### Development (Local)
 
