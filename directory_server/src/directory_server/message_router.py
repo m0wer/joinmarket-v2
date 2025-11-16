@@ -46,8 +46,6 @@ class MessageRouter:
             logger.warning(f"Unknown peer sending public message: {from_key}")
             return
 
-        self.peer_registry.mark_orderbook_watcher(from_key)
-
         connected_peers = self.peer_registry.get_all_connected(from_peer.network)
 
         for peer in connected_peers:

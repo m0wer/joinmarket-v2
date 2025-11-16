@@ -184,15 +184,20 @@ curl http://localhost:8080/status
 #   "stats": {
 #     "total_peers": 150,
 #     "connected_peers": 150,
-#     "orderbook_watchers": 45
+#     "passive_peers": 45,
+#     "active_peers": 105
 #   },
 #   "connected_peers": {
 #     "total": 150,
-#     "nicks": ["maker1", "maker2", ...]
+#     "nicks": ["maker1", "taker1", ...]
 #   },
-#   "orderbook_watchers": {
+#   "passive_peers": {
 #     "total": 45,
-#     "nicks": ["maker1", "maker5", ...]
+#     "nicks": ["taker1", "taker2", ...]
+#   },
+#   "active_peers": {
+#     "total": 105,
+#     "nicks": ["maker1", "maker2", ...]
 #   },
 #   "active_connections": 150
 # }
@@ -231,7 +236,8 @@ kill -USR1 $(pgrep jm-directory-server)
 This will log comprehensive status including:
 - Network type and uptime
 - Connected peers count and list
-- Orderbook watchers (peers sending offers)
+- Passive peers (orderbook watchers/takers - NOT-SERVING-ONION)
+- Active peers (makers - serving onion address)
 - Active connections
 
 ### Docker Health Check
@@ -257,7 +263,14 @@ docker inspect joinmarket_directory_server | grep -A 10 Health
 
 The server tracks:
 - **Connected Peers**: Total number of handshaked peers
-- **Orderbook Watchers**: Peers actively sending public orderbook messages
+- **Passive Peers**: Peers not serving onion (typically orderbook watchers/takers)
+  - These peers connect via `NOT-SERVING-ONION` and primarily watch offers
+  - Usually takers or bots monitoring the orderbook
+  - Don't host their own hidden service
+- **Active Peers**: Peers serving onion address (typically makers)
+  - These peers host their own hidden service (e.g., `xyz123....onion:5222`)
+  - Usually makers publishing liquidity offers to the orderbook
+  - Other peers can connect directly to them
 - **Active Connections**: Current TCP connections
 - **Uptime**: Server uptime in seconds
 - **Network**: mainnet/testnet/signet/regtest

@@ -137,3 +137,197 @@ def test_clear(registry, sample_peer):
 
     assert registry.count() == 0
     assert registry.get_by_nick("test_peer") is None
+
+
+def test_get_passive_peers(registry):
+    passive_peer1 = PeerInfo(
+        nick="taker1",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+    passive_peer2 = PeerInfo(
+        nick="taker2",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+    active_peer = PeerInfo(
+        nick="maker1",
+        onion_address=f"{'a' * 56}.onion",
+        port=5222,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+
+    registry.register(passive_peer1)
+    registry.register(passive_peer2)
+    registry.register(active_peer)
+
+    passive_peers = registry.get_passive_peers()
+    assert len(passive_peers) == 2
+    assert all(p.onion_address == "NOT-SERVING-ONION" for p in passive_peers)
+    assert "taker1" in [p.nick for p in passive_peers]
+    assert "taker2" in [p.nick for p in passive_peers]
+
+
+def test_get_active_peers(registry):
+    passive_peer = PeerInfo(
+        nick="taker1",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+    active_peer1 = PeerInfo(
+        nick="maker1",
+        onion_address=f"{'a' * 56}.onion",
+        port=5222,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+    active_peer2 = PeerInfo(
+        nick="maker2",
+        onion_address=f"{'b' * 56}.onion",
+        port=5222,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+
+    registry.register(passive_peer)
+    registry.register(active_peer1)
+    registry.register(active_peer2)
+
+    active_peers = registry.get_active_peers()
+    assert len(active_peers) == 2
+    assert all(p.onion_address != "NOT-SERVING-ONION" for p in active_peers)
+    assert "maker1" in [p.nick for p in active_peers]
+    assert "maker2" in [p.nick for p in active_peers]
+
+
+def test_get_passive_peers_filters_network(registry):
+    mainnet_passive = PeerInfo(
+        nick="taker1",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+    testnet_passive = PeerInfo(
+        nick="taker2",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.TESTNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+
+    registry.register(mainnet_passive)
+    registry.register(testnet_passive)
+
+    mainnet_peers = registry.get_passive_peers(NetworkType.MAINNET)
+    assert len(mainnet_peers) == 1
+    assert mainnet_peers[0].nick == "taker1"
+
+
+def test_get_active_peers_filters_network(registry):
+    mainnet_active = PeerInfo(
+        nick="maker1",
+        onion_address=f"{'a' * 56}.onion",
+        port=5222,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+    testnet_active = PeerInfo(
+        nick="maker2",
+        onion_address=f"{'b' * 56}.onion",
+        port=5222,
+        network=NetworkType.TESTNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+
+    registry.register(mainnet_active)
+    registry.register(testnet_active)
+
+    mainnet_peers = registry.get_active_peers(NetworkType.MAINNET)
+    assert len(mainnet_peers) == 1
+    assert mainnet_peers[0].nick == "maker1"
+
+
+def test_get_stats_includes_passive_and_active(registry):
+    passive_peer = PeerInfo(
+        nick="taker1",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+    active_peer = PeerInfo(
+        nick="maker1",
+        onion_address=f"{'a' * 56}.onion",
+        port=5222,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+    )
+
+    registry.register(passive_peer)
+    registry.register(active_peer)
+
+    stats = registry.get_stats()
+    assert stats["total_peers"] == 2
+    assert stats["connected_peers"] == 2
+    assert stats["passive_peers"] == 1
+    assert stats["active_peers"] == 1
+
+
+def test_passive_peers_exclude_directories(registry):
+    passive_peer = PeerInfo(
+        nick="taker1",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+        is_directory=False,
+    )
+    directory_peer = PeerInfo(
+        nick="directory",
+        onion_address="NOT-SERVING-ONION",
+        port=-1,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+        is_directory=True,
+    )
+
+    registry.register(passive_peer)
+    registry.register(directory_peer)
+
+    passive_peers = registry.get_passive_peers()
+    assert len(passive_peers) == 1
+    assert passive_peers[0].nick == "taker1"
+
+
+def test_active_peers_exclude_directories(registry):
+    active_peer = PeerInfo(
+        nick="maker1",
+        onion_address=f"{'a' * 56}.onion",
+        port=5222,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+        is_directory=False,
+    )
+    directory_peer = PeerInfo(
+        nick="directory",
+        onion_address=f"{'b' * 56}.onion",
+        port=5222,
+        network=NetworkType.MAINNET,
+        status=PeerStatus.HANDSHAKED,
+        is_directory=True,
+    )
+
+    registry.register(active_peer)
+    registry.register(directory_peer)
+
+    active_peers = registry.get_active_peers()
+    assert len(active_peers) == 1
+    assert active_peers[0].nick == "maker1"

@@ -26,14 +26,26 @@ def format_status_output(stats: dict) -> str:
 
     lines.extend(
         [
-            f"Orderbook watchers: {stats['orderbook_watchers']['total']}",
+            f"Passive peers (orderbook watchers): {stats['passive_peers']['total']}",
         ]
     )
 
-    if stats["orderbook_watchers"]["nicks"]:
-        lines.append(f"  Nicks: {', '.join(stats['orderbook_watchers']['nicks'][:20])}")
-        if len(stats["orderbook_watchers"]["nicks"]) > 20:
-            remaining = len(stats["orderbook_watchers"]["nicks"]) - 20
+    if stats["passive_peers"]["nicks"]:
+        lines.append(f"  Nicks: {', '.join(stats['passive_peers']['nicks'][:20])}")
+        if len(stats["passive_peers"]["nicks"]) > 20:
+            remaining = len(stats["passive_peers"]["nicks"]) - 20
+            lines.append(f"  ... and {remaining} more")
+
+    lines.extend(
+        [
+            f"Active peers (makers): {stats['active_peers']['total']}",
+        ]
+    )
+
+    if stats["active_peers"]["nicks"]:
+        lines.append(f"  Nicks: {', '.join(stats['active_peers']['nicks'][:20])}")
+        if len(stats["active_peers"]["nicks"]) > 20:
+            remaining = len(stats["active_peers"]["nicks"]) - 20
             lines.append(f"  ... and {remaining} more")
 
     lines.extend(

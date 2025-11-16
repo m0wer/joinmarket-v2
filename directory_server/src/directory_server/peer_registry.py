@@ -19,7 +19,6 @@ class PeerRegistry:
         self.max_peers = max_peers
         self._peers: dict[str, PeerInfo] = {}
         self._nick_to_key: dict[str, str] = {}
-        self._orderbook_watchers: set[str] = set()
 
     def register(self, peer: PeerInfo) -> None:
         if len(self._peers) >= self.max_peers:
@@ -89,30 +88,72 @@ class PeerRegistry:
     def clear(self) -> None:
         self._peers.clear()
         self._nick_to_key.clear()
-        self._orderbook_watchers.clear()
 
-    def mark_orderbook_watcher(self, key: str) -> None:
-        self._orderbook_watchers.add(key)
+    def get_passive_peers(self, network: NetworkType | None = None) -> list[PeerInfo]:
+        """
+        Get passive peers (NOT-SERVING-ONION).
 
-    def get_orderbook_watchers(self, network: NetworkType | None = None) -> list[PeerInfo]:
+        These are typically orderbook watchers/takers that don't host their own
+        onion service but connect to the directory to watch offers.
+        """
         peers = [
             p
             for p in self._peers.values()
             if p.status == PeerStatus.HANDSHAKED
-            and (
-                p.nick in self._orderbook_watchers
-                or (p.location_string() in self._orderbook_watchers)
-            )
+            and p.onion_address == "NOT-SERVING-ONION"
+            and not p.is_directory
+        ]
+        if network:
+            peers = [p for p in peers if p.network == network]
+        return peers
+
+    def get_active_peers(self, network: NetworkType | None = None) -> list[PeerInfo]:
+        """
+        Get active peers (serving onion address).
+
+        These are typically makers that host their own onion service and
+        publish offers to the orderbook.
+        """
+        peers = [
+            p
+            for p in self._peers.values()
+            if p.status == PeerStatus.HANDSHAKED
+            and p.onion_address != "NOT-SERVING-ONION"
+            and not p.is_directory
         ]
         if network:
             peers = [p for p in peers if p.network == network]
         return peers
 
     def get_stats(self) -> dict[str, int]:
-        connected = len([p for p in self._peers.values() if p.status == PeerStatus.HANDSHAKED])
-        orderbook_watchers = len(self._orderbook_watchers)
+        connected = len(
+            [
+                p
+                for p in self._peers.values()
+                if p.status == PeerStatus.HANDSHAKED and not p.is_directory
+            ]
+        )
+        passive = len(
+            [
+                p
+                for p in self._peers.values()
+                if p.status == PeerStatus.HANDSHAKED
+                and p.onion_address == "NOT-SERVING-ONION"
+                and not p.is_directory
+            ]
+        )
+        active = len(
+            [
+                p
+                for p in self._peers.values()
+                if p.status == PeerStatus.HANDSHAKED
+                and p.onion_address != "NOT-SERVING-ONION"
+                and not p.is_directory
+            ]
+        )
         return {
             "total_peers": len(self._peers),
             "connected_peers": connected,
-            "orderbook_watchers": orderbook_watchers,
+            "passive_peers": passive,
+            "active_peers": active,
         }

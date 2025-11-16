@@ -249,7 +249,8 @@ class DirectoryServer:
         registry_stats = self.peer_registry.get_stats()
 
         connected_peers = self.peer_registry.get_all_connected()
-        orderbook_watchers = self.peer_registry.get_orderbook_watchers()
+        passive_peers = self.peer_registry.get_passive_peers()
+        active_peers = self.peer_registry.get_active_peers()
 
         return {
             "network": self.network.value,
@@ -261,9 +262,13 @@ class DirectoryServer:
                 "total": len(connected_peers),
                 "nicks": [p.nick for p in connected_peers],
             },
-            "orderbook_watchers": {
-                "total": len(orderbook_watchers),
-                "nicks": [p.nick for p in orderbook_watchers],
+            "passive_peers": {
+                "total": len(passive_peers),
+                "nicks": [p.nick for p in passive_peers],
+            },
+            "active_peers": {
+                "total": len(active_peers),
+                "nicks": [p.nick for p in active_peers],
             },
             "active_connections": len(self.connections),
         }
@@ -278,9 +283,13 @@ class DirectoryServer:
         logger.info(f"  Nicks: {', '.join(stats['connected_peers']['nicks'][:10])}")
         if len(stats["connected_peers"]["nicks"]) > 10:
             logger.info(f"  ... and {len(stats['connected_peers']['nicks']) - 10} more")
-        logger.info(f"Orderbook watchers: {stats['orderbook_watchers']['total']}")
-        logger.info(f"  Nicks: {', '.join(stats['orderbook_watchers']['nicks'][:10])}")
-        if len(stats["orderbook_watchers"]["nicks"]) > 10:
-            logger.info(f"  ... and {len(stats['orderbook_watchers']['nicks']) - 10} more")
+        logger.info(f"Passive peers (orderbook watchers): {stats['passive_peers']['total']}")
+        logger.info(f"  Nicks: {', '.join(stats['passive_peers']['nicks'][:10])}")
+        if len(stats["passive_peers"]["nicks"]) > 10:
+            logger.info(f"  ... and {len(stats['passive_peers']['nicks']) - 10} more")
+        logger.info(f"Active peers (makers): {stats['active_peers']['total']}")
+        logger.info(f"  Nicks: {', '.join(stats['active_peers']['nicks'][:10])}")
+        if len(stats["active_peers"]["nicks"]) > 10:
+            logger.info(f"  ... and {len(stats['active_peers']['nicks']) - 10} more")
         logger.info(f"Active connections: {stats['active_connections']}")
         logger.info("===============================")

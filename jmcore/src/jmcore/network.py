@@ -117,7 +117,8 @@ class ConnectionPool:
             del self.connections[peer_id]
 
     async def close_all(self) -> None:
-        for conn in self.connections.values():
+        connections_snapshot = list(self.connections.values())
+        for conn in connections_snapshot:
             await conn.close()
         self.connections.clear()
 
