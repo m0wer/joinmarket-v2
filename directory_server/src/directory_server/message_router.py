@@ -27,6 +27,8 @@ class MessageRouter:
             await self._handle_private_message(envelope, from_key)
         elif envelope.message_type == MessageType.GETPEERLIST:
             await self._handle_peerlist_request(from_key)
+        elif envelope.message_type == MessageType.PING:
+            await self._handle_ping(from_key)
         else:
             logger.debug(f"Unhandled message type: {envelope.message_type}")
 
@@ -101,6 +103,14 @@ class MessageRouter:
             return
 
         await self.send_peerlist(from_key, peer.network)
+
+    async def _handle_ping(self, from_key: str) -> None:
+        pong_envelope = MessageEnvelope(message_type=MessageType.PONG, payload="")
+        try:
+            await self.send_callback(from_key, pong_envelope.to_bytes())
+            logger.debug(f"Sent PONG to {from_key}")
+        except Exception as e:
+            logger.debug(f"Failed to send PONG: {e}")
 
     async def send_peerlist(self, to_key: str, network: NetworkType) -> None:
         logger.debug(f"send_peerlist called for {to_key}, network={network}")
