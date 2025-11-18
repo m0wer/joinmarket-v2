@@ -258,22 +258,21 @@ class OrderbookAggregator:
 
         clients = await asyncio.gather(*connection_tasks, return_exceptions=True)
 
-        for (onion_address, port), client in zip(self.directory_nodes, clients):
+        for (onion_address, port), result in zip(self.directory_nodes, clients, strict=True):
             node_id = f"{onion_address}:{port}"
 
-            if isinstance(client, Exception):
-                logger.error(f"Connection to {node_id} raised exception: {client}")
-                client = None
-
-            if client:
-                self.clients[node_id] = client
-                task = asyncio.create_task(client.listen_continuously())
+            if isinstance(result, BaseException):
+                logger.error(f"Connection to {node_id} raised exception: {result}")
+                retry_task = asyncio.create_task(self._retry_failed_connection(onion_address, port))
+                self._retry_tasks.append(retry_task)
+                logger.info(f"Scheduled retry task for {node_id}")
+            elif result is not None:
+                self.clients[node_id] = result
+                task = asyncio.create_task(result.listen_continuously())
                 self.listener_tasks.append(task)
                 logger.info(f"Started listener task for {node_id}")
             else:
-                retry_task = asyncio.create_task(
-                    self._retry_failed_connection(onion_address, port)
-                )
+                retry_task = asyncio.create_task(self._retry_failed_connection(onion_address, port))
                 self._retry_tasks.append(retry_task)
                 logger.info(f"Scheduled retry task for {node_id}")
 

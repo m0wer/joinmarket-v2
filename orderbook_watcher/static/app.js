@@ -82,13 +82,16 @@ function updateDirectoryBreakdown() {
         const statusIcon = document.createElement('span');
         statusIcon.className = 'status-icon';
         if (data.connected) {
-            statusIcon.textContent = '🟢';
+            statusIcon.className = 'status-icon status-connected';
+            statusIcon.textContent = '●';
             statusIcon.title = 'Connected';
         } else if (data.connection_attempts > 0) {
-            statusIcon.textContent = '🔴';
+            statusIcon.className = 'status-icon status-disconnected';
+            statusIcon.textContent = '●';
             statusIcon.title = 'Disconnected';
         } else {
-            statusIcon.textContent = '⚪';
+            statusIcon.className = 'status-icon status-not-attempted';
+            statusIcon.textContent = '●';
             statusIcon.title = 'Not attempted';
         }
 

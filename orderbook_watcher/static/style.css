@@ -130,8 +130,20 @@ h2 {
 }
 
 .status-icon {
-    font-size: 0.8rem;
+    font-size: 0.9rem;
     line-height: 1;
+}
+
+.status-connected {
+    color: #3fb950;
+}
+
+.status-disconnected {
+    color: #f85149;
+}
+
+.status-not-attempted {
+    color: #6e7681;
 }
 
 .controls {
