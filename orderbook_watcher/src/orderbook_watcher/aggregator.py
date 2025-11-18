@@ -118,6 +118,7 @@ class OrderbookAggregator:
         self, onion_address: str, port: int
     ) -> tuple[list[Offer], list[FidelityBond], str]:
         node_id = f"{onion_address}:{port}"
+        logger.info(f"Fetching orderbook from directory: {node_id}")
         client = DirectoryClient(
             onion_address, port, self.network, self.socks_host, self.socks_port, self.timeout
         )
@@ -132,7 +133,7 @@ class OrderbookAggregator:
 
             return offers, bonds, node_id
         except Exception as e:
-            logger.error(f"Failed to fetch from {node_id}: {e}")
+            logger.error(f"Failed to fetch from directory {node_id}: {e}")
             return [], [], node_id
         finally:
             await client.close()
@@ -198,7 +199,7 @@ class OrderbookAggregator:
         status = self.node_statuses[node_id]
         status.connection_attempts += 1
 
-        logger.info(f"Attempting to connect to {node_id}")
+        logger.info(f"Connecting to directory: {node_id}")
 
         client = DirectoryClient(
             onion_address, port, self.network, self.socks_host, self.socks_port, self.timeout
@@ -218,11 +219,11 @@ class OrderbookAggregator:
             await client.connection.send(json.dumps(pubmsg).encode("utf-8"))
 
             status.mark_connected()
-            logger.info(f"Successfully connected to {node_id}")
+            logger.info(f"Successfully connected to directory: {node_id}")
             return client
 
         except Exception as e:
-            logger.warning(f"Connection to {node_id} failed: {e}")
+            logger.warning(f"Connection to directory {node_id} failed: {e}")
             await client.close()
             status.mark_disconnected()
             return None
@@ -236,14 +237,14 @@ class OrderbookAggregator:
             if node_id in self.clients:
                 continue
 
-            logger.info(f"Retrying connection to {node_id}...")
+            logger.info(f"Retrying connection to directory {node_id}...")
             client = await self._connect_to_node(onion_address, port)
 
             if client:
                 self.clients[node_id] = client
                 task = asyncio.create_task(client.listen_continuously())
                 self.listener_tasks.append(task)
-                logger.info(f"Successfully reconnected to {node_id}")
+                logger.info(f"Successfully reconnected to directory: {node_id}")
                 break
 
     async def start_continuous_listening(self) -> None:

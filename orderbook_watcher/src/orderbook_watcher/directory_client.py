@@ -460,7 +460,7 @@ class DirectoryClient:
             logger.warning(f"Failed to parse offer: {e}")
         return None
 
-    async def request_bond_for_maker(self, maker_nick: str) -> None:
+    async def request_bond_for_maker(self, maker_nick: str, peers_without_bonds: set[str]) -> None:
         if not self.connection:
             return
 
@@ -471,14 +471,20 @@ class DirectoryClient:
             }
             await self.connection.send(json.dumps(privmsg).encode("utf-8"))
             logger.debug(f"Requested bond info from {maker_nick}")
+            await asyncio.sleep(2)
+
+            offer_keys = [(k, v) for k, v in self.offers.items() if k[0] == maker_nick]
+            if offer_keys and not any(v.fidelity_bond_data for _, v in offer_keys):
+                peers_without_bonds.add(maker_nick)
+                logger.debug(f"Peer {maker_nick} has no fidelity bond")
         except Exception as e:
             logger.warning(f"Failed to request bond from {maker_nick}: {e}")
 
     async def listen_continuously(self) -> None:
         self.running = True
         logger.info(f"Starting continuous listener for {self.onion_address}:{self.port}")
-        last_bond_check_time = asyncio.get_event_loop().time()
-        bond_check_interval = 30.0
+        peers_with_bonds: set[str] = set()
+        peers_without_bonds: set[str] = set()
 
         while self.running:
             try:
@@ -510,22 +516,20 @@ class DirectoryClient:
                         self.offers[offer_key] = offer
                         logger.debug(f"Updated offer: {offer_key}")
 
-                        if is_new_offer and not offer.fidelity_bond_data:
+                        if offer.fidelity_bond_data:
+                            peers_with_bonds.add(offer.counterparty)
+                            peers_without_bonds.discard(offer.counterparty)
+                        elif is_new_offer and offer.counterparty not in peers_without_bonds:
                             logger.debug(
                                 f"New offer from {offer.counterparty} without bond, requesting..."
                             )
-                            await self.request_bond_for_maker(offer.counterparty)
+                            await self.request_bond_for_maker(
+                                offer.counterparty, peers_without_bonds
+                            )
                 elif msg_type == MessageType.PEERLIST.value:
                     logger.debug("Received PEERLIST update")
                 else:
                     logger.debug(f"Received message type {msg_type}")
-
-                current_time = asyncio.get_event_loop().time()
-                if current_time - last_bond_check_time >= bond_check_interval:
-                    for (maker_nick, _), offer in self.offers.items():
-                        if not offer.fidelity_bond_data:
-                            await self.request_bond_for_maker(maker_nick)
-                    last_bond_check_time = current_time
 
             except TimeoutError:
                 logger.debug("No messages received in 60s, sending keepalive...")

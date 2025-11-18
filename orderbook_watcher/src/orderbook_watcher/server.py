@@ -164,7 +164,7 @@ class OrderbookServer:
             except Exception as e:
                 logger.error(f"Error updating cache: {e}")
 
-            await asyncio.sleep(5)
+            await asyncio.sleep(30)
 
     async def start(self) -> None:
         logger.info(
