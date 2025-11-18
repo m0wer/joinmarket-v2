@@ -104,6 +104,8 @@ class DirectoryClient:
         self.bonds: dict[str, FidelityBond] = {}
         self.running = False
         self.on_disconnect = on_disconnect
+        self.initial_orderbook_received = False
+        self.last_orderbook_request_time: float = 0.0
 
     async def connect(self) -> None:
         try:
@@ -492,15 +494,17 @@ class DirectoryClient:
         last_orderbook_refresh_time = asyncio.get_event_loop().time()
         peerlist_check_interval = 1800.0
         orderbook_refresh_interval = 1800.0
+        orderbook_retry_interval = 300.0
 
         if self.connection:
-            await self.get_peerlist()
+            peer_count = len(await self.get_peerlist())
             pubmsg = {
                 "type": MessageType.PUBMSG.value,
                 "line": f"{self.nick}!PUBLIC!!orderbook",
             }
             await self.connection.send(json.dumps(pubmsg).encode("utf-8"))
-            logger.info("Sent initial !orderbook request")
+            self.last_orderbook_request_time = asyncio.get_event_loop().time()
+            logger.info(f"Sent initial !orderbook request ({peer_count} peers)")
             last_orderbook_refresh_time = asyncio.get_event_loop().time()
 
         while self.running:
@@ -522,6 +526,12 @@ class DirectoryClient:
                         self.offers[offer_key] = offer
                         logger.debug(f"Updated offer: {offer_key}")
 
+                        if not self.initial_orderbook_received and len(self.offers) > 0:
+                            self.initial_orderbook_received = True
+                            logger.info(
+                                f"Received first offers from {self.onion_address}:{self.port}"
+                            )
+
                         if offer.fidelity_bond_data:
                             peers_with_bonds.add(offer.counterparty)
                             peers_without_bonds.discard(offer.counterparty)
@@ -538,6 +548,32 @@ class DirectoryClient:
                     logger.debug(f"Received message type {msg_type}")
 
                 current_time = asyncio.get_event_loop().time()
+
+                if (
+                    not self.initial_orderbook_received
+                    and len(self.offers) == 0
+                    and current_time - self.last_orderbook_request_time >= orderbook_retry_interval
+                ):
+                    logger.warning(
+                        f"No offers received yet from {self.onion_address}:{self.port}, "
+                        f"retrying !orderbook request"
+                    )
+                    if self.connection:
+                        try:
+                            peer_count = len(await self.get_peerlist())
+                            if peer_count > 0:
+                                pubmsg = {
+                                    "type": MessageType.PUBMSG.value,
+                                    "line": f"{self.nick}!PUBLIC!!orderbook",
+                                }
+                                await self.connection.send(json.dumps(pubmsg).encode("utf-8"))
+                                self.last_orderbook_request_time = current_time
+                                logger.info(f"Resent !orderbook request ({peer_count} peers)")
+                            else:
+                                logger.warning("No peers in peerlist, skipping retry")
+                        except Exception as e:
+                            logger.warning(f"Failed to retry orderbook request: {e}")
+
                 if current_time - last_peerlist_check_time >= peerlist_check_interval:
                     removed_count = await self._cleanup_disconnected_peers()
                     if removed_count > 0:
@@ -552,6 +588,7 @@ class DirectoryClient:
                             "line": f"{self.nick}!PUBLIC!!orderbook",
                         }
                         await self.connection.send(json.dumps(pubmsg).encode("utf-8"))
+                        self.last_orderbook_request_time = current_time
                     last_orderbook_refresh_time = current_time
 
             except TimeoutError:
