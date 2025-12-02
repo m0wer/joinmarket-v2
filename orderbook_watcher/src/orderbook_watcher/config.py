@@ -19,10 +19,12 @@ class Settings(BaseSettings):
     tor_socks_host: str = "127.0.0.1"
     tor_socks_port: int = 9050
 
-    mempool_api_url: str = "http://mempoolhqx4isw62xs7abwphsq7s7j7l5q5t5lk46o3v6drqd.onion/api"
+    mempool_api_url: str = (
+        "http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion/api"
+    )
     mempool_web_url: str | None = "https://mempool.sgn.space"
     mempool_web_onion_url: str | None = (
-        "http://mempoolhqx4isw62xs7abwphsq7s7j7l5q5t5lk46o3v6drqd.onion"
+        "http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion"
     )
 
     http_host: str = "0.0.0.0"

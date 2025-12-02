@@ -94,9 +94,9 @@ All configuration is done via environment variables:
 | `DIRECTORY_NODES` | Comma-separated list of directory nodes (host:port) | (required) |
 | `TOR_SOCKS_HOST` | Tor SOCKS proxy host | 127.0.0.1 |
 | `TOR_SOCKS_PORT` | Tor SOCKS proxy port | 9050 |
-| `MEMPOOL_API_URL` | Mempool.space API base URL | http://mempoolhqx4isw62xs7abwphsq7s7j7l5q5t5lk46o3v6drqd.onion/api |
+| `MEMPOOL_API_URL` | Mempool.space API base URL | http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion/api |
 | `MEMPOOL_WEB_URL` | Base URL for transaction links (optional) | https://mempool.sgn.space |
-| `MEMPOOL_WEB_ONION_URL` | Onion base URL for transaction links (optional) | http://mempoolhqx4isw62xs7abwphsq7s7j7l5q5t5lk46o3v6drqd.onion |
+| `MEMPOOL_WEB_ONION_URL` | Onion base URL for transaction links (optional) | http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion |
 | `HTTP_HOST` | HTTP server bind address | 0.0.0.0 |
 | `HTTP_PORT` | HTTP server port | 8000 |
 | `UPDATE_INTERVAL` | Orderbook update interval in seconds | 60 |
@@ -137,7 +137,7 @@ cat tor/data/hidden_service/hostname
 4. (Optional) Configure onion-friendly links:
    If you want the web interface to use onion links for Mempool.space when visited via Tor, add this to your `.env`:
 ```bash
-MEMPOOL_WEB_ONION_URL=http://mempoolhqx4isw62xs7abwphsq7s7j7l5q5t5lk46o3v6drqd.onion
+MEMPOOL_WEB_ONION_URL=http://mempopwcaqoi7z5xj5zplfdwk5bgzyl3hemx725d4a3agado6xtk3kqd.onion
 ```
 
 ## API Endpoints
