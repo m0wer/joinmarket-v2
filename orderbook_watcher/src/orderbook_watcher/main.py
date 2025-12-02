@@ -51,6 +51,7 @@ async def run_watcher() -> None:
         socks_port=settings.tor_socks_port,
         timeout=settings.connection_timeout,
         mempool_api_url=settings.mempool_api_url,
+        max_message_size=settings.max_message_size,
     )
 
     server = OrderbookServer(settings, aggregator)

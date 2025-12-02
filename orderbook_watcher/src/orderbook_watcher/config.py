@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    max_message_size: int = 40000
+    max_message_size: int = 2097152  # 2MB
     connection_timeout: float = 30.0
 
     def get_directory_nodes(self) -> list[tuple[str, int]]:

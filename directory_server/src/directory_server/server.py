@@ -44,7 +44,10 @@ class DirectoryServer:
 
     async def start(self) -> None:
         self.server = await asyncio.start_server(
-            self._handle_client, self.settings.host, self.settings.port
+            self._handle_client,
+            self.settings.host,
+            self.settings.port,
+            limit=self.settings.max_message_size,
         )
 
         addr = self.server.sockets[0].getsockname()

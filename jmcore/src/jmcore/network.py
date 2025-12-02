@@ -35,7 +35,7 @@ class TCPConnection(Connection):
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
-        max_message_size: int = 40000,
+        max_message_size: int = 2097152,  # 2MB
     ):
         self.reader = reader
         self.writer = writer
@@ -131,7 +131,7 @@ async def connect_via_tor(
     port: int,
     socks_host: str = "127.0.0.1",
     socks_port: int = 9050,
-    max_message_size: int = 40000,
+    max_message_size: int = 2097152,  # 2MB
     timeout: float = 30.0,
 ) -> TCPConnection:
     try:
@@ -147,7 +147,7 @@ async def connect_via_tor(
         await asyncio.get_event_loop().run_in_executor(None, sock.connect, (onion_address, port))
 
         sock.setblocking(False)
-        reader, writer = await asyncio.open_connection(sock=sock)
+        reader, writer = await asyncio.open_connection(sock=sock, limit=max_message_size)
 
         logger.info(f"Connected to {onion_address}:{port}")
         return TCPConnection(reader, writer, max_message_size)

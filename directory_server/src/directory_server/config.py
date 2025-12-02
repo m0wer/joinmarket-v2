@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     port: int = 5222
 
     max_peers: int = 1000
-    max_message_size: int = 40000
+    max_message_size: int = 2097152  # 2MB
     message_rate_limit: int = 100
 
     log_level: str = "INFO"

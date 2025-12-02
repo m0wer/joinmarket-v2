@@ -86,6 +86,7 @@ class OrderbookAggregator:
         mempool_api_url: str = "https://mempool.space/api",
         max_retry_attempts: int = 3,
         retry_delay: float = 5.0,
+        max_message_size: int = 2097152,
     ) -> None:
         self.directory_nodes = directory_nodes
         self.network = network
@@ -95,6 +96,7 @@ class OrderbookAggregator:
         self.mempool_api_url = mempool_api_url
         self.max_retry_attempts = max_retry_attempts
         self.retry_delay = retry_delay
+        self.max_message_size = max_message_size
         socks_proxy = f"socks5://{socks_host}:{socks_port}"
         logger.info(f"Configuring MempoolAPI with SOCKS proxy: {socks_proxy}")
         mempool_timeout = 60.0
@@ -143,7 +145,13 @@ class OrderbookAggregator:
         node_id = f"{onion_address}:{port}"
         logger.info(f"Fetching orderbook from directory: {node_id}")
         client = DirectoryClient(
-            onion_address, port, self.network, self.socks_host, self.socks_port, self.timeout
+            onion_address,
+            port,
+            self.network,
+            self.socks_host,
+            self.socks_port,
+            self.timeout,
+            max_message_size=self.max_message_size,
         )
         try:
             await client.connect()
@@ -236,6 +244,7 @@ class OrderbookAggregator:
             self.socks_host,
             self.socks_port,
             self.timeout,
+            max_message_size=self.max_message_size,
             on_disconnect=on_disconnect,
         )
 
