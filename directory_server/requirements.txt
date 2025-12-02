@@ -8,10 +8,32 @@
     # via -r requirements.in
 annotated-types==0.7.0
     # via pydantic
+anyio==4.12.0
+    # via httpx
+certifi==2025.11.12
+    # via
+    #   httpcore
+    #   httpx
 cffi==2.0.0
     # via cryptography
 cryptography==46.0.3
     # via jmcore
+h11==0.16.0
+    # via httpcore
+httpcore==1.0.9
+    # via
+    #   httpx
+    #   httpx-socks
+httpx==0.28.1
+    # via
+    #   httpx-socks
+    #   jmcore
+httpx-socks==0.10.1
+    # via jmcore
+idna==3.11
+    # via
+    #   anyio
+    #   httpx
 loguru==0.7.3
     # via
     #   -r requirements.in
@@ -27,14 +49,19 @@ pydantic-core==2.41.5
     # via pydantic
 pydantic-settings==2.12.0
     # via -r requirements.in
+pysocks==1.7.1
+    # via jmcore
 python-bitcointx==1.1.5
     # via jmcore
 python-dotenv==1.2.1
     # via pydantic-settings
+python-socks==2.7.3
+    # via httpx-socks
 stem==1.8.2
     # via -r requirements.in
 typing-extensions==4.15.0
     # via
+    #   anyio
     #   pydantic
     #   pydantic-core
     #   typing-inspection

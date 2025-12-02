@@ -7,13 +7,15 @@ RUN apt-get update && \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-COPY orderbook_watcher/requirements.txt /app/orderbook_watcher/
 COPY jmcore/requirements.txt /app/jmcore/
+RUN pip install --no-cache-dir -r /app/jmcore/requirements.txt
 
-RUN pip install --no-cache-dir -r /app/jmcore/requirements.txt && \
-    pip install --no-cache-dir -r /app/orderbook_watcher/requirements.txt
+# Copy jmcore source (needed for editable install in requirements.txt)
+COPY jmcore /app/jmcore
 
-COPY jmcore/src /app/jmcore/src
+COPY orderbook_watcher/requirements.txt /app/orderbook_watcher/
+RUN pip install --no-cache-dir -r /app/orderbook_watcher/requirements.txt
+
 COPY orderbook_watcher/src /app/orderbook_watcher/src
 COPY orderbook_watcher/static /app/orderbook_watcher/static
 
