@@ -372,8 +372,11 @@ class DirectoryClient:
     async def close(self) -> None:
         if self.connection:
             try:
-                disconnect_msg = {"type": MessageType.DISCONNECT.value, "line": ""}
-                await self.connection.send(json.dumps(disconnect_msg).encode("utf-8"))
+                # NOTE: We skip sending DISCONNECT (801) because the reference implementation
+                # crashes on unhandled control messages.
+                # disconnect_msg = {"type": MessageType.DISCONNECT.value, "line": ""}
+                # await self.connection.send(json.dumps(disconnect_msg).encode("utf-8"))
+                pass
             except Exception:
                 pass
             finally:
@@ -607,17 +610,11 @@ class DirectoryClient:
                         last_orderbook_refresh_time = current_time
 
             except TimeoutError:
-                logger.debug("No messages received in 60s, sending keepalive...")
-                try:
-                    if not self.connection:
-                        raise DirectoryClientError("Not connected")
-                    ping_msg = {"type": MessageType.PING.value, "line": ""}
-                    await self.connection.send(json.dumps(ping_msg).encode("utf-8"))
-                except Exception as e:
-                    logger.warning(f"Failed to send ping: {e}")
-                    self.connection = None
-                    if self.on_disconnect:
-                        self.on_disconnect()
+                # NOTE: We do NOT send keepalive PINGs because the reference implementation
+                # of the directory server (joinmarket-clientserver) crashes on receiving PING (797)
+                # due to an ID collision with its internal 'connect-in' message.
+                # We simply log the timeout and continue listening.
+                logger.debug("No messages received in 60s (keepalive skipped)")
             except Exception as e:
                 logger.error(f"Error in continuous listener: {e}")
                 self.connection = None
