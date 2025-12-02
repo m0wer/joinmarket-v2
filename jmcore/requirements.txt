@@ -40,6 +40,8 @@ pydantic==2.12.5
     # via jmcore (pyproject.toml)
 pydantic-core==2.41.5
     # via pydantic
+pysocks==1.7.1
+    # via jmcore (pyproject.toml)
 python-bitcointx==1.1.5
     # via jmcore (pyproject.toml)
 python-socks==2.7.3
