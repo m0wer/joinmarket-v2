@@ -195,14 +195,18 @@ class OrderbookServer:
             self._background_update_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._background_update_task
+            self._background_update_task = None
 
         logger.info("Stopping directory listeners...")
         await self.aggregator.stop_listening()
 
         if self.site:
-            await self.site.stop()
+            with contextlib.suppress(RuntimeError):
+                await self.site.stop()
+            self.site = None
 
         if self.runner:
             await self.runner.cleanup()
+            self.runner = None
 
         logger.info("Orderbook server stopped")

@@ -56,20 +56,14 @@ async def run_watcher() -> None:
 
     server = OrderbookServer(settings, aggregator)
 
-    loop = asyncio.get_running_loop()
-
-    def shutdown_handler() -> None:
-        logger.info("Received shutdown signal")
-        asyncio.create_task(server.stop())
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, shutdown_handler)
-
     try:
         await server.start()
 
+        # Keep running until interrupted
         while True:
-            await asyncio.sleep(1)
+            await asyncio.sleep(3600)
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt")
     except asyncio.CancelledError:
         logger.info("Watcher cancelled")
     except Exception as e:
