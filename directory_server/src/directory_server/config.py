@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 5222
 
-    max_peers: int = 1000
+    max_peers: int = 10000
     max_message_size: int = 2097152  # 2MB
     message_rate_limit: int = 100
 

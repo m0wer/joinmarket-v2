@@ -41,7 +41,7 @@ def test_server_is_unhealthy_when_no_server(server):
 
 
 def test_server_is_unhealthy_when_max_peers_reached(server):
-    for i in range(1001):
+    for i in range(10001):
         peer = PeerInfo(
             nick=f"peer{i}",
             onion_address="NOT-SERVING-ONION",
@@ -66,7 +66,7 @@ def test_get_stats(server):
     assert "active_connections" in stats
 
     assert stats["network"] == "mainnet"
-    assert stats["max_peers"] == 1000
+    assert stats["max_peers"] == 10000
 
 
 def test_get_detailed_stats(server):
@@ -152,7 +152,7 @@ def test_log_status(server):
 
         assert "Directory Server Status" in log_output
         assert "mainnet" in log_output
-        assert "Connected peers: 2/1000" in log_output
+        assert "Connected peers: 2/10000" in log_output
         assert "Passive peers (orderbook watchers): 1" in log_output
         assert "Active peers (makers): 1" in log_output
         assert "taker1" in log_output
