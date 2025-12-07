@@ -5,7 +5,7 @@ Implements Single Responsibility Principle: only manages peer state.
 """
 
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 
 from jmcore.models import NetworkType, PeerInfo, PeerStatus
 from loguru import logger
@@ -32,7 +32,7 @@ class PeerRegistry:
         if peer.nick:
             self._nick_to_key[peer.nick] = key
 
-        peer.last_seen = datetime.utcnow()
+        peer.last_seen = datetime.now(UTC)
         logger.info(f"Registered peer: {peer.nick} at {location}")
 
     def unregister(self, key: str) -> None:
@@ -63,7 +63,7 @@ class PeerRegistry:
         if peer:
             peer.status = status
             if status in (PeerStatus.CONNECTED, PeerStatus.HANDSHAKED):
-                peer.last_seen = datetime.utcnow()
+                peer.last_seen = datetime.now(UTC)
 
     def _iter_connected(self, network: NetworkType | None = None) -> Iterator[PeerInfo]:
         """Memory-efficient iterator over connected peers."""

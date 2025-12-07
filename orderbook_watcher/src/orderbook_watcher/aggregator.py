@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from jmcore.bond_calc import calculate_timelocked_fidelity_bond_value
@@ -32,18 +32,18 @@ class DirectoryNodeStatus:
         self.successful_connections = 0
         self.total_uptime_seconds = 0.0
         self.current_session_start: datetime | None = None
-        self.tracking_started = tracking_started or datetime.utcnow()
+        self.tracking_started = tracking_started or datetime.now(UTC)
         self.grace_period_seconds = grace_period_seconds
 
     def mark_connected(self, current_time: datetime | None = None) -> None:
-        now = current_time or datetime.utcnow()
+        now = current_time or datetime.now(UTC)
         self.connected = True
         self.last_connected = now
         self.current_session_start = now
         self.successful_connections += 1
 
     def mark_disconnected(self, current_time: datetime | None = None) -> None:
-        now = current_time or datetime.utcnow()
+        now = current_time or datetime.now(UTC)
         if self.connected and self.current_session_start:
             # Only count uptime after grace period
             grace_end_ts = self.tracking_started.timestamp() + self.grace_period_seconds
@@ -64,7 +64,7 @@ class DirectoryNodeStatus:
     def get_uptime_percentage(self, current_time: datetime | None = None) -> float:
         if not self.tracking_started:
             return 0.0
-        now = current_time or datetime.utcnow()
+        now = current_time or datetime.now(UTC)
         elapsed = (now - self.tracking_started).total_seconds()
 
         # If we're still in grace period, return 100% uptime
@@ -216,7 +216,7 @@ class OrderbookAggregator:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        new_orderbook = OrderBook(timestamp=datetime.utcnow())
+        new_orderbook = OrderBook(timestamp=datetime.now(UTC))
 
         for result in results:
             if isinstance(result, BaseException):
@@ -382,7 +382,7 @@ class OrderbookAggregator:
         self._retry_tasks.clear()
 
     async def get_live_orderbook(self, calculate_bonds: bool = True) -> OrderBook:
-        orderbook = OrderBook(timestamp=datetime.utcnow())
+        orderbook = OrderBook(timestamp=datetime.now(UTC))
 
         for node_id, client in self.clients.items():
             offers = client.get_current_offers()
@@ -485,7 +485,7 @@ class OrderbookAggregator:
         return bond
 
     async def _calculate_bond_values(self, orderbook: OrderBook) -> None:
-        current_time = int(datetime.utcnow().timestamp())
+        current_time = int(datetime.now(UTC).timestamp())
 
         tasks = [
             self._calculate_bond_value_single(bond, current_time)

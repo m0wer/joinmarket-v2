@@ -6,7 +6,7 @@ Implements Open/Closed Principle: extensible without modification.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 
 from jmcore.models import MessageEnvelope, NetworkType, PeerStatus
 from jmcore.network import ConnectionPool, TCPConnection
@@ -40,7 +40,7 @@ class DirectoryServer:
 
         self.server: asyncio.Server | None = None
         self._shutdown = False
-        self._start_time = datetime.utcnow()
+        self._start_time = datetime.now(UTC)
         self.health_server = HealthCheckServer(
             host=settings.health_check_host, port=settings.health_check_port
         )
@@ -246,7 +246,7 @@ class DirectoryServer:
         }
 
     def get_detailed_stats(self) -> dict:
-        uptime = (datetime.utcnow() - self._start_time).total_seconds()
+        uptime = (datetime.now(UTC) - self._start_time).total_seconds()
         registry_stats = self.peer_registry.get_stats()
 
         connected_peers = self.peer_registry.get_all_connected()

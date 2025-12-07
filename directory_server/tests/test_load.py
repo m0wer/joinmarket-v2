@@ -12,6 +12,7 @@ import time
 
 import psutil
 import pytest
+import pytest_asyncio
 from jmcore.models import MessageEnvelope, NetworkType
 from jmcore.protocol import COMMAND_PREFIX, JM_VERSION, MessageType
 from loguru import logger
@@ -167,7 +168,7 @@ class LoadTestScenario:
         }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def test_server():
     settings = Settings(
         host="127.0.0.1",

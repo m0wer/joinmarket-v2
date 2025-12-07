@@ -4,7 +4,7 @@ Core data models using Pydantic for validation and serialization.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from functools import cached_property
 from typing import Any
@@ -66,7 +66,7 @@ class PeerInfo(BaseModel):
 class MessageEnvelope(BaseModel):
     message_type: int = Field(..., ge=0)
     payload: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def to_bytes(self) -> bytes:
         import json

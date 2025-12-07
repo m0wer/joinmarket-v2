@@ -4,12 +4,27 @@ on:
   push:
     paths:
       - 'jmcore/**'
+      - 'jmwallet/**'
       - 'directory_server/**'
       - 'orderbook_watcher/**'
+      - 'maker/**'
+      - 'tests/**'
+      - 'pytest.ini'
+      - '.github/workflows/test.yaml'
+  pull_request:
+    paths:
+      - 'jmcore/**'
+      - 'jmwallet/**'
+      - 'directory_server/**'
+      - 'orderbook_watcher/**'
+      - 'maker/**'
+      - 'tests/**'
+      - 'pytest.ini'
       - '.github/workflows/test.yaml'
   workflow_call:
 
 jobs:
+  # jmcore is the base dependency - always test it first
   test-jmcore:
     runs-on: ubuntu-latest
     steps:
@@ -45,8 +60,58 @@ jobs:
           path: jmcore/coverage.xml
         if: ${{ always() }}
 
+  # jmwallet has no project dependencies
+  test-jmwallet:
+    runs-on: ubuntu-latest
+    if: |
+      contains(github.event.head_commit.modified, 'jmwallet/') ||
+      contains(github.event.head_commit.added, 'jmwallet/') ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_call'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Install jmwallet dependencies
+        working-directory: jmwallet
+        run: |
+          pip install -e .[dev]
+
+      - name: Run jmwallet tests
+        working-directory: jmwallet
+        run: pytest --junitxml=junit/test-results.xml --cov=jmwallet --cov-report=term-missing --cov-report=xml -v
+
+      - name: Upload jmwallet test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmwallet-pytest-results
+          path: jmwallet/junit/test-results.xml
+        if: ${{ always() }}
+
+      - name: Upload jmwallet coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: jmwallet-coverage
+          path: jmwallet/coverage.xml
+        if: ${{ always() }}
+
+  # directory_server depends on jmcore
   test-directory-server:
     runs-on: ubuntu-latest
+    needs: test-jmcore
+    if: |
+      contains(github.event.head_commit.modified, 'directory_server/') ||
+      contains(github.event.head_commit.modified, 'jmcore/') ||
+      contains(github.event.head_commit.added, 'directory_server/') ||
+      contains(github.event.head_commit.added, 'jmcore/') ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_call'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -83,8 +148,17 @@ jobs:
           path: directory_server/coverage.xml
         if: ${{ always() }}
 
+  # orderbook_watcher depends on jmcore
   test-orderbook-watcher:
     runs-on: ubuntu-latest
+    needs: test-jmcore
+    if: |
+      contains(github.event.head_commit.modified, 'orderbook_watcher/') ||
+      contains(github.event.head_commit.modified, 'jmcore/') ||
+      contains(github.event.head_commit.added, 'orderbook_watcher/') ||
+      contains(github.event.head_commit.added, 'jmcore/') ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_call'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -119,4 +193,100 @@ jobs:
         with:
           name: orderbook-watcher-coverage
           path: orderbook_watcher/coverage.xml
+        if: ${{ always() }}
+
+  # maker depends on jmcore and jmwallet
+  test-maker:
+    runs-on: ubuntu-latest
+    needs: [test-jmcore, test-jmwallet]
+    if: |
+      contains(github.event.head_commit.modified, 'maker/') ||
+      contains(github.event.head_commit.modified, 'jmcore/') ||
+      contains(github.event.head_commit.modified, 'jmwallet/') ||
+      contains(github.event.head_commit.added, 'maker/') ||
+      contains(github.event.head_commit.added, 'jmcore/') ||
+      contains(github.event.head_commit.added, 'jmwallet/') ||
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_call'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Install jmcore first
+        working-directory: jmcore
+        run: pip install -e .
+
+      - name: Install jmwallet
+        working-directory: jmwallet
+        run: pip install -e .
+
+      - name: Install maker dependencies
+        working-directory: maker
+        run: pip install -e .[dev]
+
+      - name: Run maker tests
+        working-directory: maker
+        run: pytest --junitxml=junit/test-results.xml --cov=maker --cov-report=term-missing --cov-report=xml -v
+
+      - name: Upload maker test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: maker-pytest-results
+          path: maker/junit/test-results.xml
+        if: ${{ always() }}
+
+      - name: Upload maker coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: maker-coverage
+          path: maker/coverage.xml
+        if: ${{ always() }}
+
+  # e2e tests depend on all modules - always run
+  test-e2e:
+    runs-on: ubuntu-latest
+    needs: [test-jmcore, test-jmwallet, test-directory-server, test-orderbook-watcher, test-maker]
+    if: |
+      always() &&
+      needs.test-jmcore.result == 'success' &&
+      needs.test-jmwallet.result == 'success'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+
+      - name: Install all dependencies
+        run: |
+          pip install -e jmcore
+          pip install -e jmwallet
+          pip install -e directory_server[dev]
+          pip install -e orderbook_watcher[dev]
+          pip install -e maker[dev]
+
+      - name: Run e2e tests
+        run: pytest tests/e2e --junitxml=junit/test-results.xml --cov --cov-report=term-missing --cov-report=xml -v
+
+      - name: Upload e2e test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-pytest-results
+          path: junit/test-results.xml
+        if: ${{ always() }}
+
+      - name: Upload e2e coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-coverage
+          path: coverage.xml
         if: ${{ always() }}

@@ -32,6 +32,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "-v --cov=jmwallet --cov-report=html --cov-report=term"
 
 [tool.mypy]
 python_version = "3.14"

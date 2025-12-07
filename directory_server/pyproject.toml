@@ -56,5 +56,5 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v"
+addopts = "-v --cov=directory_server --cov-report=html --cov-report=term"
 asyncio_mode = "auto"

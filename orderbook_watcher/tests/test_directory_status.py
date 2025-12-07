@@ -2,13 +2,13 @@
 Tests for DirectoryNodeStatus uptime calculations.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from orderbook_watcher.aggregator import DirectoryNodeStatus
 
 
 def test_uptime_accumulates_across_disconnects() -> None:
-    start_time = datetime(2024, 1, 1, 0, 0, 0)
+    start_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     status = DirectoryNodeStatus("node.test", tracking_started=start_time)
     status.mark_connected(start_time)
 
@@ -24,7 +24,7 @@ def test_uptime_accumulates_across_disconnects() -> None:
 
 
 def test_uptime_updates_when_session_in_progress() -> None:
-    start_time = datetime(2024, 1, 1, 0, 0, 0)
+    start_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     status = DirectoryNodeStatus("node.test", tracking_started=start_time)
     status.mark_connected(start_time)
 
@@ -36,7 +36,7 @@ def test_uptime_updates_when_session_in_progress() -> None:
 
 def test_uptime_zero_before_first_connection() -> None:
     """Uptime should be 0% if never connected, not undefined."""
-    start_time = datetime(2024, 1, 1, 0, 0, 0)
+    start_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     status = DirectoryNodeStatus("node.test", tracking_started=start_time)
 
     # 10 minutes later, still no connection
@@ -48,7 +48,7 @@ def test_uptime_zero_before_first_connection() -> None:
 
 def test_uptime_reflects_offline_time_before_first_connection() -> None:
     """A node offline for 10 minutes then connected for 10 should show 50% uptime."""
-    start_time = datetime(2024, 1, 1, 0, 0, 0)
+    start_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     status = DirectoryNodeStatus("node.test", tracking_started=start_time)
 
     # Connect 10 minutes after tracking started
@@ -65,16 +65,16 @@ def test_uptime_reflects_offline_time_before_first_connection() -> None:
 
 def test_tracking_started_in_to_dict() -> None:
     """Ensure tracking_started is exposed in the API response."""
-    start_time = datetime(2024, 1, 1, 12, 0, 0)
+    start_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
     status = DirectoryNodeStatus("node.test", tracking_started=start_time)
 
     result = status.to_dict()
-    assert result["tracking_started"] == "2024-01-01T12:00:00"
+    assert result["tracking_started"] == "2024-01-01T12:00:00+00:00"
 
 
 def test_grace_period_shows_100_percent_uptime() -> None:
     """During grace period, uptime should be 100% regardless of connection status."""
-    start_time = datetime(2024, 1, 1, 0, 0, 0)
+    start_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     grace_period = 60  # 60 seconds
     status = DirectoryNodeStatus(
         "node.test", tracking_started=start_time, grace_period_seconds=grace_period
@@ -88,7 +88,7 @@ def test_grace_period_shows_100_percent_uptime() -> None:
 
 def test_grace_period_excluded_from_total_time() -> None:
     """After grace period, total time should exclude the grace period."""
-    start_time = datetime(2024, 1, 1, 0, 0, 0)
+    start_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     grace_period = 60  # 60 seconds
     status = DirectoryNodeStatus(
         "node.test", tracking_started=start_time, grace_period_seconds=grace_period
@@ -108,7 +108,7 @@ def test_grace_period_excluded_from_total_time() -> None:
 
 def test_grace_period_with_early_connection() -> None:
     """If connected during grace period, uptime is calculated correctly after."""
-    start_time = datetime(2024, 1, 1, 0, 0, 0)
+    start_time = datetime(2024, 1, 1, 0, 0, 0, tzinfo=UTC)
     grace_period = 60  # 60 seconds
     status = DirectoryNodeStatus(
         "node.test", tracking_started=start_time, grace_period_seconds=grace_period

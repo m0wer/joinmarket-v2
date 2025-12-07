@@ -5,7 +5,7 @@ Fidelity bond value calculations.
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import UTC, datetime
 
 DEFAULT_INTEREST_RATE = 0.015
 DEFAULT_BOND_VALUE_EXPONENT = 1.3
@@ -34,7 +34,7 @@ def calculate_timelocked_fidelity_bond_value(
         Bond value as integer
     """
     if current_time is None:
-        current_time = int(datetime.utcnow().timestamp())
+        current_time = int(datetime.now(UTC).timestamp())
 
     year = 60 * 60 * 24 * 365.2425
 
