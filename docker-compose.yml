@@ -145,6 +145,36 @@ services:
     profiles:
       - maker  # Only start with: docker-compose --profile maker up
 
+  # Taker client (to be run manually for testing)
+  taker:
+    build:
+      context: .
+      dockerfile: taker/Dockerfile
+    container_name: jm-taker
+    restart: "no"  # Manual start only
+    environment:
+      - MNEMONIC=${TAKER_MNEMONIC:-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about}
+      - NETWORK=regtest
+      - BACKEND_TYPE=bitcoin_core
+      - BITCOIN_RPC_URL=http://jm-bitcoin:18443
+      - BITCOIN_RPC_USER=test
+      - BITCOIN_RPC_PASSWORD=test
+      - DIRECTORY_SERVERS=jm-directory:5222
+      - LOG_LEVEL=DEBUG
+      - COINJOIN_AMOUNT=1000000
+      - MIN_MAKERS=2
+      - MAX_CJ_FEE_REL=0.01
+      - MAX_CJ_FEE_ABS=10000
+    networks:
+      - jm-network
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+      directory:
+        condition: service_healthy
+    profiles:
+      - taker  # Only start with: docker-compose --profile taker up
+
 volumes:
   bitcoin-data:
 

@@ -142,6 +142,28 @@ Tests offer management:
 pytest tests/e2e/test_complete_system.py::test_offer_creation -v
 ```
 
+### 5. Taker Tests
+
+Tests taker functionality:
+- Taker initialization and nick generation
+- Directory server connection
+- Orderbook fetching
+- PoDLE commitment generation
+- Transaction builder utilities
+
+```bash
+# Run all taker tests
+pytest tests/e2e/test_complete_system.py -k "taker" -v
+
+# Run specific taker tests
+pytest tests/e2e/test_complete_system.py::test_taker_initialization -v
+pytest tests/e2e/test_complete_system.py::test_taker_connect_directory -v
+pytest tests/e2e/test_complete_system.py::test_taker_orderbook_fetch -v
+pytest tests/e2e/test_complete_system.py::test_taker_orderbook_manager -v
+pytest tests/e2e/test_complete_system.py::test_taker_podle_generation -v
+pytest tests/e2e/test_complete_system.py::test_taker_tx_builder -v
+```
+
 ## Manual Testing
 
 ### Test Wallet Sync

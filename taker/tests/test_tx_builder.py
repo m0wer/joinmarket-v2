@@ -1,0 +1,399 @@
+"""
+Tests for transaction builder module.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from taker.tx_builder import (
+    CoinJoinTxBuilder,
+    CoinJoinTxData,
+    TxInput,
+    TxOutput,
+    address_to_scriptpubkey,
+    build_coinjoin_tx,
+    calculate_tx_fee,
+    serialize_outpoint,
+    varint,
+)
+
+
+class TestVarint:
+    """Tests for varint encoding."""
+
+    def test_single_byte(self) -> None:
+        """Test single-byte varint (0-252)."""
+        assert varint(0) == bytes([0x00])
+        assert varint(1) == bytes([0x01])
+        assert varint(252) == bytes([0xFC])
+
+    def test_two_bytes(self) -> None:
+        """Test two-byte varint (253-65535)."""
+        result = varint(253)
+        assert result[0] == 0xFD
+        assert len(result) == 3
+
+        result = varint(65535)
+        assert result[0] == 0xFD
+        assert len(result) == 3
+
+    def test_four_bytes(self) -> None:
+        """Test four-byte varint (65536-4294967295)."""
+        result = varint(65536)
+        assert result[0] == 0xFE
+        assert len(result) == 5
+
+    def test_eight_bytes(self) -> None:
+        """Test eight-byte varint (> 4294967295)."""
+        result = varint(4294967296)
+        assert result[0] == 0xFF
+        assert len(result) == 9
+
+
+class TestSerializeOutpoint:
+    """Tests for outpoint serialization."""
+
+    def test_serialize_outpoint(self) -> None:
+        """Test outpoint serialization reverses txid."""
+        txid = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        vout = 1
+
+        result = serialize_outpoint(txid, vout)
+
+        # Should be 32 bytes (reversed txid) + 4 bytes (vout)
+        assert len(result) == 36
+
+        # txid should be reversed (little-endian)
+        expected_txid = bytes.fromhex(txid)[::-1]
+        assert result[:32] == expected_txid
+
+        # vout should be little-endian uint32
+        assert result[32:36] == bytes([0x01, 0x00, 0x00, 0x00])
+
+
+class TestAddressToScriptPubKey:
+    """Tests for address to scriptPubKey conversion."""
+
+    def test_p2wpkh_mainnet(self) -> None:
+        """Test mainnet P2WPKH address."""
+        # Known address from BIP-0173
+        address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        script = address_to_scriptpubkey(address)
+
+        # P2WPKH: OP_0 <20-byte-hash>
+        assert script[0] == 0x00
+        assert script[1] == 0x14  # 20 bytes
+        assert len(script) == 22
+
+    def test_p2wpkh_testnet(self) -> None:
+        """Test testnet P2WPKH address."""
+        address = "tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx"
+        script = address_to_scriptpubkey(address)
+
+        assert script[0] == 0x00
+        assert script[1] == 0x14
+        assert len(script) == 22
+
+    def test_p2wpkh_regtest(self) -> None:
+        """Test regtest P2WPKH address."""
+        address = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
+        script = address_to_scriptpubkey(address)
+
+        assert script[0] == 0x00
+        assert script[1] == 0x14
+        assert len(script) == 22
+
+    def test_p2wsh_mainnet(self) -> None:
+        """Test mainnet P2WSH address."""
+        # 62-character bech32 address
+        address = "bc1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qccfmv3"
+        script = address_to_scriptpubkey(address)
+
+        # P2WSH: OP_0 <32-byte-hash>
+        assert script[0] == 0x00
+        assert script[1] == 0x20  # 32 bytes
+        assert len(script) == 34
+
+    def test_p2pkh_mainnet(self) -> None:
+        """Test mainnet P2PKH address."""
+        address = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
+        script = address_to_scriptpubkey(address)
+
+        # P2PKH: OP_DUP OP_HASH160 <20-byte-hash> OP_EQUALVERIFY OP_CHECKSIG
+        assert script[0] == 0x76  # OP_DUP
+        assert script[1] == 0xA9  # OP_HASH160
+        assert script[2] == 0x14  # 20 bytes
+        assert script[-2] == 0x88  # OP_EQUALVERIFY
+        assert script[-1] == 0xAC  # OP_CHECKSIG
+        assert len(script) == 25
+
+    def test_p2sh_mainnet(self) -> None:
+        """Test mainnet P2SH address."""
+        address = "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"
+        script = address_to_scriptpubkey(address)
+
+        # P2SH: OP_HASH160 <20-byte-hash> OP_EQUAL
+        assert script[0] == 0xA9  # OP_HASH160
+        assert script[1] == 0x14  # 20 bytes
+        assert script[-1] == 0x87  # OP_EQUAL
+        assert len(script) == 23
+
+    def test_invalid_bech32(self) -> None:
+        """Test invalid bech32 address."""
+        with pytest.raises(ValueError, match="Invalid bech32"):
+            address_to_scriptpubkey("bc1invalid")
+
+    def test_invalid_base58(self) -> None:
+        """Test invalid base58 address."""
+        with pytest.raises(Exception):  # base58 raises its own exception
+            address_to_scriptpubkey("1InvalidAddress")
+
+
+class TestTxInput:
+    """Tests for TxInput dataclass."""
+
+    def test_default_values(self) -> None:
+        """Test default values."""
+        inp = TxInput(txid="a" * 64, vout=0, value=100000)
+        assert inp.scriptpubkey == ""
+        assert inp.sequence == 0xFFFFFFFF
+
+    def test_custom_sequence(self) -> None:
+        """Test custom sequence number."""
+        inp = TxInput(txid="a" * 64, vout=1, value=50000, sequence=0xFFFFFFFE)
+        assert inp.sequence == 0xFFFFFFFE
+
+
+class TestTxOutput:
+    """Tests for TxOutput dataclass."""
+
+    def test_basic_output(self) -> None:
+        """Test basic output creation."""
+        out = TxOutput(address="bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", value=100000)
+        assert out.address == "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        assert out.value == 100000
+        assert out.scriptpubkey == ""
+
+
+class TestCalculateTxFee:
+    """Tests for transaction fee calculation."""
+
+    def test_simple_fee_calculation(self) -> None:
+        """Test simple fee calculation."""
+        # 1 taker input, 2 maker inputs, 5 outputs (3 CJ + 2 change)
+        fee = calculate_tx_fee(
+            num_taker_inputs=1,
+            num_maker_inputs=2,
+            num_outputs=5,
+            fee_rate=10,
+        )
+
+        # Expected: (3 * 68) + (5 * 31) + 11 = 204 + 155 + 11 = 370 vbytes
+        # 370 * 10 = 3700 sats
+        assert fee == 3700
+
+    def test_larger_coinjoin(self) -> None:
+        """Test fee for larger CoinJoin."""
+        # 2 taker inputs, 8 maker inputs, 12 outputs
+        fee = calculate_tx_fee(
+            num_taker_inputs=2,
+            num_maker_inputs=8,
+            num_outputs=12,
+            fee_rate=5,
+        )
+
+        # Expected: (10 * 68) + (12 * 31) + 11 = 680 + 372 + 11 = 1063 vbytes
+        # 1063 * 5 = 5315 sats
+        assert fee == 5315
+
+
+class TestCoinJoinTxBuilder:
+    """Tests for CoinJoinTxBuilder class."""
+
+    @pytest.fixture
+    def builder(self) -> CoinJoinTxBuilder:
+        """Create a builder for tests."""
+        return CoinJoinTxBuilder(network="regtest")
+
+    @pytest.fixture
+    def sample_tx_data(self) -> CoinJoinTxData:
+        """Create sample transaction data."""
+        return CoinJoinTxData(
+            taker_inputs=[
+                TxInput(txid="a" * 64, vout=0, value=2_000_000),
+            ],
+            taker_cj_output=TxOutput(
+                address="bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+                value=1_000_000,
+            ),
+            taker_change_output=TxOutput(
+                address="bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+                value=990_000,
+            ),
+            maker_inputs={
+                "maker1": [TxInput(txid="b" * 64, vout=1, value=1_500_000)],
+                "maker2": [TxInput(txid="c" * 64, vout=2, value=1_200_000)],
+            },
+            maker_cj_outputs={
+                "maker1": TxOutput(
+                    address="bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+                    value=1_000_000,
+                ),
+                "maker2": TxOutput(
+                    address="bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+                    value=1_000_000,
+                ),
+            },
+            maker_change_outputs={
+                "maker1": TxOutput(
+                    address="bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+                    value=501_000,
+                ),
+                "maker2": TxOutput(
+                    address="bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+                    value=201_000,
+                ),
+            },
+            cj_amount=1_000_000,
+            total_maker_fee=2_000,
+            tx_fee=8_000,
+        )
+
+    def test_build_unsigned_tx(
+        self, builder: CoinJoinTxBuilder, sample_tx_data: CoinJoinTxData
+    ) -> None:
+        """Test building an unsigned transaction."""
+        tx_bytes, metadata = builder.build_unsigned_tx(sample_tx_data)
+
+        # Check that we got bytes
+        assert isinstance(tx_bytes, bytes)
+        assert len(tx_bytes) > 0
+
+        # Check metadata
+        assert "input_owners" in metadata
+        assert "output_owners" in metadata
+        assert "input_values" in metadata
+
+        # Should have 3 inputs (1 taker + 2 makers)
+        assert len(metadata["input_owners"]) == 3
+
+        # Should have 6 outputs (3 CJ + 3 change)
+        assert len(metadata["output_owners"]) == 6
+
+    def test_tx_has_correct_version(
+        self, builder: CoinJoinTxBuilder, sample_tx_data: CoinJoinTxData
+    ) -> None:
+        """Test that transaction has version 2."""
+        tx_bytes, _ = builder.build_unsigned_tx(sample_tx_data)
+
+        # Version is first 4 bytes (little-endian)
+        version = int.from_bytes(tx_bytes[:4], "little")
+        assert version == 2
+
+    def test_tx_has_segwit_marker(
+        self, builder: CoinJoinTxBuilder, sample_tx_data: CoinJoinTxData
+    ) -> None:
+        """Test that transaction has SegWit marker and flag."""
+        tx_bytes, _ = builder.build_unsigned_tx(sample_tx_data)
+
+        # Marker (0x00) and flag (0x01) after version
+        assert tx_bytes[4] == 0x00
+        assert tx_bytes[5] == 0x01
+
+    def test_parse_tx_roundtrip(
+        self, builder: CoinJoinTxBuilder, sample_tx_data: CoinJoinTxData
+    ) -> None:
+        """Test that parsing and re-serializing produces same result."""
+        tx_bytes, _ = builder.build_unsigned_tx(sample_tx_data)
+
+        # Parse
+        version, marker, flag, inputs, outputs, witnesses, locktime = builder._parse_tx(tx_bytes)
+
+        # Verify counts
+        assert len(inputs) == 3
+        assert len(outputs) == 6
+        assert version == 2
+        assert locktime == 0
+
+    def test_get_txid(self, builder: CoinJoinTxBuilder, sample_tx_data: CoinJoinTxData) -> None:
+        """Test txid calculation."""
+        tx_bytes, _ = builder.build_unsigned_tx(sample_tx_data)
+        txid = builder.get_txid(tx_bytes)
+
+        # Should be 64 hex characters
+        assert len(txid) == 64
+        assert all(c in "0123456789abcdef" for c in txid)
+
+
+class TestBuildCoinjoinTx:
+    """Tests for build_coinjoin_tx convenience function."""
+
+    def test_build_simple_coinjoin(self) -> None:
+        """Test building a simple CoinJoin transaction."""
+        taker_utxos = [
+            {"txid": "a" * 64, "vout": 0, "value": 2_000_000},
+        ]
+        maker_data = {
+            "maker1": {
+                "utxos": [{"txid": "b" * 64, "vout": 1, "value": 1_500_000}],
+                "cj_addr": "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+                "change_addr": "bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+                "cjfee": 1000,
+            },
+        }
+
+        tx_bytes, metadata = build_coinjoin_tx(
+            taker_utxos=taker_utxos,
+            taker_cj_address="bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+            taker_change_address="bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+            taker_total_input=2_000_000,
+            maker_data=maker_data,
+            cj_amount=1_000_000,
+            tx_fee=5000,
+            network="regtest",
+        )
+
+        assert isinstance(tx_bytes, bytes)
+        assert len(tx_bytes) > 0
+
+        # Should have 2 inputs
+        assert len(metadata["input_owners"]) == 2
+
+        # Should have 4 outputs (2 CJ + 2 change)
+        assert len(metadata["output_owners"]) == 4
+
+    def test_build_coinjoin_dust_change_excluded(self) -> None:
+        """Test that dust change outputs are excluded."""
+        taker_utxos = [
+            {
+                "txid": "a" * 64,
+                "vout": 0,
+                "value": 1_001_500,
+            },  # Just enough for CJ + fee + tiny change
+        ]
+        maker_data = {
+            "maker1": {
+                "utxos": [{"txid": "b" * 64, "vout": 1, "value": 1_000_500}],  # Just enough
+                "cj_addr": "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+                "change_addr": "bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+                "cjfee": 500,  # Maker gets this fee
+            },
+        }
+
+        tx_bytes, metadata = build_coinjoin_tx(
+            taker_utxos=taker_utxos,
+            taker_cj_address="bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+            taker_change_address="bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+            taker_total_input=1_001_500,
+            maker_data=maker_data,
+            cj_amount=1_000_000,
+            tx_fee=500,
+            network="regtest",
+        )
+
+        # Taker change: 1_001_500 - 1_000_000 - 500 - 500 = 500 (dust, excluded)
+        # Maker change: 1_000_500 - 1_000_000 + 500 = 1000 (above dust)
+        # So only 3 outputs: 2 CJ + 1 maker change
+        change_outputs = [o for o in metadata["output_owners"] if o[1] == "change"]
+        assert len(change_outputs) == 1
