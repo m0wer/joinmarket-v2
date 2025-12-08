@@ -65,11 +65,6 @@ jobs:
   # jmwallet has no project dependencies
   test-jmwallet:
     runs-on: ubuntu-latest
-    if: |
-      contains(github.event.head_commit.modified, 'jmwallet/') ||
-      contains(github.event.head_commit.added, 'jmwallet/') ||
-      github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_call'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -106,14 +101,6 @@ jobs:
   # directory_server depends on jmcore
   test-directory-server:
     runs-on: ubuntu-latest
-    needs: test-jmcore
-    if: |
-      contains(github.event.head_commit.modified, 'directory_server/') ||
-      contains(github.event.head_commit.modified, 'jmcore/') ||
-      contains(github.event.head_commit.added, 'directory_server/') ||
-      contains(github.event.head_commit.added, 'jmcore/') ||
-      github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_call'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -153,14 +140,6 @@ jobs:
   # orderbook_watcher depends on jmcore
   test-orderbook-watcher:
     runs-on: ubuntu-latest
-    needs: test-jmcore
-    if: |
-      contains(github.event.head_commit.modified, 'orderbook_watcher/') ||
-      contains(github.event.head_commit.modified, 'jmcore/') ||
-      contains(github.event.head_commit.added, 'orderbook_watcher/') ||
-      contains(github.event.head_commit.added, 'jmcore/') ||
-      github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_call'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -200,16 +179,6 @@ jobs:
   # maker depends on jmcore and jmwallet
   test-maker:
     runs-on: ubuntu-latest
-    needs: [test-jmcore, test-jmwallet]
-    if: |
-      contains(github.event.head_commit.modified, 'maker/') ||
-      contains(github.event.head_commit.modified, 'jmcore/') ||
-      contains(github.event.head_commit.modified, 'jmwallet/') ||
-      contains(github.event.head_commit.added, 'maker/') ||
-      contains(github.event.head_commit.added, 'jmcore/') ||
-      contains(github.event.head_commit.added, 'jmwallet/') ||
-      github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_call'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -253,16 +222,6 @@ jobs:
   # taker depends on jmcore and jmwallet
   test-taker:
     runs-on: ubuntu-latest
-    needs: [test-jmcore, test-jmwallet]
-    if: |
-      contains(github.event.head_commit.modified, 'taker/') ||
-      contains(github.event.head_commit.modified, 'jmcore/') ||
-      contains(github.event.head_commit.modified, 'jmwallet/') ||
-      contains(github.event.head_commit.added, 'taker/') ||
-      contains(github.event.head_commit.added, 'jmcore/') ||
-      contains(github.event.head_commit.added, 'jmwallet/') ||
-      github.event_name == 'pull_request' ||
-      github.event_name == 'workflow_call'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -306,12 +265,6 @@ jobs:
   # e2e tests depend on all modules - always run
   test-e2e:
     runs-on: ubuntu-latest
-    needs: [test-jmcore, test-jmwallet, test-directory-server, test-orderbook-watcher, test-maker, test-taker]
-    if: |
-      always() &&
-      needs.test-jmcore.result == 'success' &&
-      needs.test-jmwallet.result == 'success'
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
