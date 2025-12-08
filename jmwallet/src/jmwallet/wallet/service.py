@@ -146,6 +146,12 @@ class WalletService:
         utxos = self.utxo_cache.get(mixdepth, [])
         return sum(utxo.value for utxo in utxos)
 
+    async def get_utxos(self, mixdepth: int) -> list[UTXOInfo]:
+        """Get UTXOs for a mixdepth, syncing if not cached."""
+        if mixdepth not in self.utxo_cache:
+            await self.sync_mixdepth(mixdepth)
+        return self.utxo_cache.get(mixdepth, [])
+
     async def get_total_balance(self) -> int:
         """Get total balance across all mixdepths"""
         total = 0

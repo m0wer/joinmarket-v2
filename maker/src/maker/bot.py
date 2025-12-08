@@ -15,14 +15,9 @@ import json
 from typing import Any
 
 from jmcore.crypto import generate_jm_nick
+from jmcore.directory_client import DirectoryClient
 from jmcore.models import Offer
-from jmcore.network import TCPConnection, connect_via_tor
-from jmcore.protocol import (
-    COMMAND_PREFIX,
-    JM_VERSION,
-    MessageType,
-    create_handshake_request,
-)
+from jmcore.protocol import COMMAND_PREFIX, JM_VERSION
 from jmwallet.backends.base import BlockchainBackend
 from jmwallet.wallet.service import WalletService
 from loguru import logger
@@ -50,11 +45,12 @@ class MakerBot:
 
         self.offer_manager = OfferManager(self.wallet, config, self.nick)
 
-        self.directory_connections: list[TCPConnection] = []
+        self.directory_clients: dict[str, DirectoryClient] = {}
         self.active_sessions: dict[str, CoinJoinSession] = {}
         self.current_offers: list[Offer] = []
 
         self.running = False
+        self.listen_tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
         """
@@ -89,30 +85,24 @@ class MakerBot:
                     host = parts[0]
                     port = int(parts[1]) if len(parts) > 1 else 5222
 
-                    # Use direct connection for localhost/local IPs, Tor for onion addresses
-                    if host.endswith(".onion"):
-                        connection = await connect_via_tor(host, port)
-                    elif (
-                        host in ("localhost", "127.0.0.1")
-                        or host.startswith("192.168.")
-                        or host.startswith("10.")
-                    ):
-                        from jmcore.network import connect_direct
+                    # Create DirectoryClient
+                    client = DirectoryClient(
+                        onion_address=host,
+                        port=port,
+                        network=self.config.network.value,
+                        nick=self.nick,
+                    )
 
-                        connection = await connect_direct(host, port)
-                    else:
-                        # For public IPs, use Tor by default
-                        connection = await connect_via_tor(host, port)
-
-                    await self._handshake(connection)
-                    self.directory_connections.append(connection)
+                    await client.connect()
+                    node_id = f"{host}:{port}"
+                    self.directory_clients[node_id] = client
 
                     logger.info(f"Connected to directory: {dir_server}")
 
                 except Exception as e:
                     logger.error(f"Failed to connect to {dir_server}: {e}")
 
-            if not self.directory_connections:
+            if not self.directory_clients:
                 logger.error("Failed to connect to any directory server")
                 return
 
@@ -122,7 +112,13 @@ class MakerBot:
             logger.info("Maker bot started. Listening for takers...")
             self.running = True
 
-            await self._listen_loop()
+            # Start listening on all clients
+            for node_id, client in self.directory_clients.items():
+                task = asyncio.create_task(self._listen_client(node_id, client))
+                self.listen_tasks.append(task)
+
+            # Wait for all listening tasks to complete
+            await asyncio.gather(*self.listen_tasks, return_exceptions=True)
 
         except Exception as e:
             logger.error(f"Failed to start maker bot: {e}")
@@ -133,56 +129,31 @@ class MakerBot:
         logger.info("Stopping maker bot...")
         self.running = False
 
-        for connection in self.directory_connections:
+        # Cancel all listening tasks
+        for task in self.listen_tasks:
+            task.cancel()
+
+        if self.listen_tasks:
+            await asyncio.gather(*self.listen_tasks, return_exceptions=True)
+
+        # Close all directory clients
+        for client in self.directory_clients.values():
             try:
-                await connection.close()
+                await client.close()
             except Exception:
                 pass
 
         await self.wallet.close()
         logger.info("Maker bot stopped")
 
-    async def _handshake(self, connection: TCPConnection) -> None:
-        """Perform handshake with directory server"""
-        handshake_data = create_handshake_request(
-            nick=self.nick,
-            location="NOT-SERVING-ONION",
-            network=self.config.network.value,
-            directory=False,
-        )
-
-        handshake_msg = {
-            "type": MessageType.HANDSHAKE.value,
-            "line": json.dumps(handshake_data),
-        }
-
-        await connection.send(json.dumps(handshake_msg).encode("utf-8"))
-
-        response_data = await asyncio.wait_for(connection.receive(), timeout=30.0)
-        response = json.loads(response_data.decode("utf-8"))
-
-        if response["type"] not in (MessageType.HANDSHAKE.value, MessageType.DN_HANDSHAKE.value):
-            raise ValueError(f"Unexpected handshake response: {response['type']}")
-
-        handshake_response = json.loads(response["line"])
-        if not handshake_response.get("accepted", False):
-            raise ValueError("Handshake rejected by directory")
-
-        logger.debug("Handshake successful")
-
     async def _announce_offers(self) -> None:
         """Announce offers to all connected directory servers"""
         for offer in self.current_offers:
             offer_msg = self._format_offer_announcement(offer)
 
-            pubmsg = {
-                "type": MessageType.PUBMSG.value,
-                "line": offer_msg,
-            }
-
-            for connection in self.directory_connections:
+            for client in self.directory_clients.values():
                 try:
-                    await connection.send(json.dumps(pubmsg).encode("utf-8"))
+                    await client.send_public_message(offer_msg)
                     logger.debug("Announced offer to directory")
                 except Exception as e:
                     logger.error(f"Failed to announce offer: {e}")
@@ -200,30 +171,32 @@ class MakerBot:
 
         return msg
 
-    async def _listen_loop(self) -> None:
-        """Main listen loop for incoming messages"""
+    async def _listen_client(self, node_id: str, client: DirectoryClient) -> None:
+        """Listen for messages from a specific directory client"""
+        logger.info(f"Started listening on {node_id}")
+
         while self.running:
             try:
-                for connection in self.directory_connections:
-                    try:
-                        response_data = await asyncio.wait_for(connection.receive(), timeout=1.0)
-                        response = json.loads(response_data.decode("utf-8"))
+                # Use listen_for_messages with short duration to check running flag frequently
+                messages = await client.listen_for_messages(duration=1.0)
 
-                        await self._handle_message(response)
+                for message in messages:
+                    await self._handle_message(message)
 
-                    except TimeoutError:
-                        continue
-                    except Exception as e:
-                        logger.debug(f"Error receiving message: {e}")
-                        continue
-
+            except asyncio.CancelledError:
+                logger.info(f"Listener for {node_id} cancelled")
+                break
             except Exception as e:
-                logger.error(f"Error in listen loop: {e}")
+                logger.error(f"Error listening on {node_id}: {e}")
                 await asyncio.sleep(1.0)
+
+        logger.info(f"Stopped listening on {node_id}")
 
     async def _handle_message(self, message: dict[str, Any]) -> None:
         """Handle incoming message from directory"""
         try:
+            from jmcore.protocol import MessageType
+
             msg_type = message.get("type")
             line = message.get("line", "")
 
@@ -372,15 +345,10 @@ class MakerBot:
         """Send response to taker"""
         try:
             data_json = json.dumps(data)
-            msg = f"{self.nick}!{taker_nick}{COMMAND_PREFIX}{command} {data_json}"
+            msg = f"{command} {data_json}"
 
-            privmsg = {
-                "type": MessageType.PRIVMSG.value,
-                "line": msg,
-            }
-
-            for connection in self.directory_connections:
-                await connection.send(json.dumps(privmsg).encode("utf-8"))
+            for client in self.directory_clients.values():
+                await client.send_private_message(taker_nick, msg)
 
             logger.debug(f"Sent {command} to {taker_nick}")
 

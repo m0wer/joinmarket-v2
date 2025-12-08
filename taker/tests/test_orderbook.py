@@ -1,0 +1,319 @@
+"""
+Unit tests for orderbook management and order selection.
+"""
+
+from __future__ import annotations
+
+import pytest
+from jmcore.models import Offer, OfferType
+
+from taker.config import MaxCjFee
+from taker.orderbook import (
+    OrderbookManager,
+    calculate_cj_fee,
+    cheapest_order_choose,
+    choose_orders,
+    dedupe_offers_by_maker,
+    fidelity_bond_weighted_choose,
+    filter_offers,
+    is_fee_within_limits,
+    random_order_choose,
+    weighted_order_choose,
+)
+
+
+@pytest.fixture
+def sample_offers() -> list[Offer]:
+    """Sample offers for testing."""
+    return [
+        Offer(
+            counterparty="maker1",
+            oid=0,
+            ordertype=OfferType.SW0_RELATIVE,
+            minsize=10_000,
+            maxsize=1_000_000,
+            txfee=1000,
+            cjfee="0.001",
+            fidelity_bond_value=100_000,
+        ),
+        Offer(
+            counterparty="maker2",
+            oid=0,
+            ordertype=OfferType.SW0_RELATIVE,
+            minsize=10_000,
+            maxsize=500_000,
+            txfee=500,
+            cjfee="0.0005",
+            fidelity_bond_value=50_000,
+        ),
+        Offer(
+            counterparty="maker3",
+            oid=0,
+            ordertype=OfferType.SW0_ABSOLUTE,
+            minsize=10_000,
+            maxsize=2_000_000,
+            txfee=1500,
+            cjfee=5000,  # Absolute fee
+            fidelity_bond_value=200_000,
+        ),
+        Offer(
+            counterparty="maker4",
+            oid=0,
+            ordertype=OfferType.SW0_RELATIVE,
+            minsize=100_000,
+            maxsize=10_000_000,
+            txfee=2000,
+            cjfee="0.002",
+            fidelity_bond_value=0,
+        ),
+    ]
+
+
+@pytest.fixture
+def max_cj_fee() -> MaxCjFee:
+    """Default fee limits - generous enough to allow maker3's absolute fee at 50k."""
+    return MaxCjFee(abs_fee=50_000, rel_fee="0.1")
+
+
+class TestCalculateCjFee:
+    """Tests for calculate_cj_fee."""
+
+    def test_relative_fee(self) -> None:
+        """Test relative fee calculation."""
+        offer = Offer(
+            counterparty="maker",
+            oid=0,
+            ordertype=OfferType.SW0_RELATIVE,
+            minsize=10_000,
+            maxsize=1_000_000,
+            txfee=1000,
+            cjfee="0.001",
+        )
+        # 0.1% of 100,000 = 100
+        assert calculate_cj_fee(offer, 100_000) == 100
+
+    def test_absolute_fee(self) -> None:
+        """Test absolute fee calculation."""
+        offer = Offer(
+            counterparty="maker",
+            oid=0,
+            ordertype=OfferType.SW0_ABSOLUTE,
+            minsize=10_000,
+            maxsize=1_000_000,
+            txfee=1000,
+            cjfee=5000,
+        )
+        # Fixed 5000 sats regardless of amount
+        assert calculate_cj_fee(offer, 100_000) == 5000
+        assert calculate_cj_fee(offer, 1_000_000) == 5000
+
+
+class TestIsFeeWithinLimits:
+    """Tests for is_fee_within_limits."""
+
+    def test_within_limits(self, max_cj_fee: MaxCjFee) -> None:
+        """Test fee within limits."""
+        offer = Offer(
+            counterparty="maker",
+            oid=0,
+            ordertype=OfferType.SW0_RELATIVE,
+            minsize=10_000,
+            maxsize=1_000_000,
+            txfee=1000,
+            cjfee="0.001",  # 0.1%
+        )
+        # 0.1% of 100,000 = 100, within both limits
+        assert is_fee_within_limits(offer, 100_000, max_cj_fee) is True
+
+    def test_exceeds_absolute_limit(self) -> None:
+        """Test fee exceeds absolute limit."""
+        max_fee = MaxCjFee(abs_fee=1000, rel_fee="0.01")
+        offer = Offer(
+            counterparty="maker",
+            oid=0,
+            ordertype=OfferType.SW0_ABSOLUTE,
+            minsize=10_000,
+            maxsize=1_000_000,
+            txfee=1000,
+            cjfee=5000,  # > 1000 limit
+        )
+        assert is_fee_within_limits(offer, 100_000, max_fee) is False
+
+    def test_exceeds_relative_limit(self) -> None:
+        """Test fee exceeds relative limit."""
+        max_fee = MaxCjFee(abs_fee=50_000, rel_fee="0.0005")  # 0.05%
+        offer = Offer(
+            counterparty="maker",
+            oid=0,
+            ordertype=OfferType.SW0_RELATIVE,
+            minsize=10_000,
+            maxsize=1_000_000,
+            txfee=1000,
+            cjfee="0.001",  # 0.1% > 0.05%
+        )
+        assert is_fee_within_limits(offer, 100_000, max_fee) is False
+
+
+class TestFilterOffers:
+    """Tests for filter_offers."""
+
+    def test_filters_by_amount_range(
+        self, sample_offers: list[Offer], max_cj_fee: MaxCjFee
+    ) -> None:
+        """Test filtering by amount range."""
+        # maker4 requires minsize=100_000
+        filtered = filter_offers(sample_offers, 50_000, max_cj_fee)
+        assert len(filtered) == 3
+        assert all(o.counterparty != "maker4" for o in filtered)
+
+    def test_filters_ignored_makers(self, sample_offers: list[Offer], max_cj_fee: MaxCjFee) -> None:
+        """Test filtering ignored makers."""
+        filtered = filter_offers(
+            sample_offers, 100_000, max_cj_fee, ignored_makers={"maker1", "maker2"}
+        )
+        assert len(filtered) == 2
+        assert all(o.counterparty not in ("maker1", "maker2") for o in filtered)
+
+    def test_filters_by_offer_type(self, sample_offers: list[Offer], max_cj_fee: MaxCjFee) -> None:
+        """Test filtering by offer type."""
+        filtered = filter_offers(
+            sample_offers, 100_000, max_cj_fee, allowed_types={OfferType.SW0_ABSOLUTE}
+        )
+        assert len(filtered) == 1
+        assert filtered[0].counterparty == "maker3"
+
+
+class TestDedupeOffersByMaker:
+    """Tests for dedupe_offers_by_maker."""
+
+    def test_keeps_cheapest(self) -> None:
+        """Test keeping only cheapest offer per maker."""
+        offers = [
+            Offer(
+                counterparty="maker1",
+                oid=0,
+                ordertype=OfferType.SW0_RELATIVE,
+                minsize=10_000,
+                maxsize=1_000_000,
+                txfee=1000,
+                cjfee="0.002",  # More expensive
+            ),
+            Offer(
+                counterparty="maker1",
+                oid=1,
+                ordertype=OfferType.SW0_RELATIVE,
+                minsize=10_000,
+                maxsize=1_000_000,
+                txfee=1000,
+                cjfee="0.001",  # Cheaper
+            ),
+        ]
+        deduped = dedupe_offers_by_maker(offers)
+        assert len(deduped) == 1
+        assert deduped[0].cjfee == "0.001"
+
+
+class TestOrderChoosers:
+    """Tests for order selection algorithms."""
+
+    def test_random_order_choose(self, sample_offers: list[Offer]) -> None:
+        """Test random selection."""
+        selected = random_order_choose(sample_offers, 2)
+        assert len(selected) == 2
+        assert all(o in sample_offers for o in selected)
+
+    def test_random_order_choose_more_than_available(self, sample_offers: list[Offer]) -> None:
+        """Test random selection when requesting more than available."""
+        selected = random_order_choose(sample_offers, 10)
+        assert len(selected) == len(sample_offers)
+
+    def test_cheapest_order_choose(self, sample_offers: list[Offer]) -> None:
+        """Test cheapest selection."""
+        selected = cheapest_order_choose(sample_offers, 2, cj_amount=100_000)
+        assert len(selected) == 2
+        # maker2 (0.0005) and maker3 (5000 absolute = 5% at 100k) should be cheapest
+        # Actually maker2 = 50 sats, maker3 = 5000 sats, maker1 = 100 sats
+        nicks = {o.counterparty for o in selected}
+        assert "maker2" in nicks  # Cheapest at 50 sats
+
+    def test_weighted_order_choose(self, sample_offers: list[Offer]) -> None:
+        """Test weighted selection."""
+        selected = weighted_order_choose(sample_offers, 2)
+        assert len(selected) == 2
+        assert all(o in sample_offers for o in selected)
+
+    def test_fidelity_bond_weighted_choose(self, sample_offers: list[Offer]) -> None:
+        """Test fidelity bond weighted selection."""
+        selected = fidelity_bond_weighted_choose(sample_offers, 2)
+        assert len(selected) == 2
+        # maker3 has highest bond value (200,000), should be frequently selected
+
+
+class TestChooseOrders:
+    """Tests for choose_orders."""
+
+    def test_choose_orders(self, sample_offers: list[Offer], max_cj_fee: MaxCjFee) -> None:
+        """Test full order selection flow."""
+        orders, total_fee = choose_orders(
+            offers=sample_offers,
+            cj_amount=100_000,
+            n=2,
+            max_cj_fee=max_cj_fee,
+        )
+        assert len(orders) == 2
+        assert total_fee > 0
+
+    def test_choose_orders_not_enough_makers(
+        self, sample_offers: list[Offer], max_cj_fee: MaxCjFee
+    ) -> None:
+        """Test when not enough makers available."""
+        orders, total_fee = choose_orders(
+            offers=sample_offers[:1],  # Only 1 offer
+            cj_amount=100_000,
+            n=3,
+            max_cj_fee=max_cj_fee,
+        )
+        assert len(orders) == 1
+
+
+class TestOrderbookManager:
+    """Tests for OrderbookManager."""
+
+    def test_update_offers(self, sample_offers: list[Offer], max_cj_fee: MaxCjFee) -> None:
+        """Test updating orderbook."""
+        manager = OrderbookManager(max_cj_fee)
+        manager.update_offers(sample_offers)
+        assert len(manager.offers) == len(sample_offers)
+
+    def test_add_ignored_maker(self, max_cj_fee: MaxCjFee) -> None:
+        """Test adding ignored maker."""
+        manager = OrderbookManager(max_cj_fee)
+        manager.add_ignored_maker("bad_maker")
+        assert "bad_maker" in manager.ignored_makers
+
+    def test_add_honest_maker(self, max_cj_fee: MaxCjFee) -> None:
+        """Test adding honest maker."""
+        manager = OrderbookManager(max_cj_fee)
+        manager.add_honest_maker("good_maker")
+        assert "good_maker" in manager.honest_makers
+
+    def test_select_makers(self, sample_offers: list[Offer], max_cj_fee: MaxCjFee) -> None:
+        """Test maker selection."""
+        manager = OrderbookManager(max_cj_fee)
+        manager.update_offers(sample_offers)
+
+        orders, fee = manager.select_makers(cj_amount=100_000, n=2)
+        assert len(orders) == 2
+        assert fee > 0
+
+    def test_select_makers_honest_only(
+        self, sample_offers: list[Offer], max_cj_fee: MaxCjFee
+    ) -> None:
+        """Test honest-only maker selection."""
+        manager = OrderbookManager(max_cj_fee)
+        manager.update_offers(sample_offers)
+        manager.add_honest_maker("maker1")
+
+        orders, fee = manager.select_makers(cj_amount=100_000, n=2, honest_only=True)
+        # Only maker1 is honest
+        assert len(orders) <= 1

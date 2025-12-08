@@ -11,6 +11,7 @@ on:
       - 'directory_server/**'
       - 'orderbook_watcher/**'
       - 'maker/**'
+      - 'taker/**'
       - '.github/workflows/docker.yaml'
       - '.github/workflows/test.yaml'
   pull_request:
@@ -23,6 +24,7 @@ on:
       - 'directory_server/**'
       - 'orderbook_watcher/**'
       - 'maker/**'
+      - 'taker/**'
       - '.github/workflows/docker.yaml'
       - '.github/workflows/test.yaml'
 
@@ -51,18 +53,35 @@ jobs:
             image: ghcr.io/${{ github.repository }}/directory-server
             target: production
             tag_suffix: ""
+            name: directory-server
           # Directory server - debug (with pdbpp, memray, full debug symbols)
           - context: .
             dockerfile: ./directory_server/Dockerfile
             image: ghcr.io/${{ github.repository }}/directory-server
             target: debug
             tag_suffix: "-debug"
+            name: directory-server-debug
           # Orderbook watcher
           - context: .
             dockerfile: ./orderbook_watcher/Dockerfile
             image: ghcr.io/${{ github.repository }}/orderbook-watcher
             target: ""
             tag_suffix: ""
+            name: orderbook-watcher
+          # Maker
+          - context: .
+            dockerfile: ./maker/Dockerfile
+            image: ghcr.io/${{ github.repository }}/maker
+            target: ""
+            tag_suffix: ""
+            name: maker
+          # Taker
+          - context: .
+            dockerfile: ./taker/Dockerfile
+            image: ghcr.io/${{ github.repository }}/taker
+            target: ""
+            tag_suffix: ""
+            name: taker
 
     permissions:
       contents: read
