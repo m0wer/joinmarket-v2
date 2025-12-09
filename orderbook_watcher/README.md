@@ -247,7 +247,3 @@ This implementation improves upon the original JoinMarket orderbook watcher:
 - No rotation buttons (auto-refresh only)
 - No chart generation (focused on orderbook display)
 - Clean, minimal UI without unnecessary features
-
-## License
-
-MIT
