@@ -25,7 +25,7 @@ We are incrementally implementing JoinMarket components while maintaining protoc
 | 3 | **Orderbook Watcher** | ✅ Complete | Monitor and aggregate CoinJoin orders |
 | 4 | **jmwallet** | ✅ Complete | BIP32/39/84 wallet with pluggable backends (NO BerkeleyDB!) |
 | 5 | **Maker Bot** | ✅ Complete | Yield generator - PoDLE, TX verification, signing, fidelity bonds |
-| 6 | **Taker Bot** | 📋 Planned | CoinJoin participant |
+| 6 | **Taker Bot** | 🚧 In Progress | CoinJoin participant |
 | 7 | **Protocol Extensions** | 🔮 Future | Nostr relays, [CoinJoinXT](https://www.youtube.com/watch?v=YS0MksuMl9k) + LN |
 
 **Maker Bot Status (Phase 5):**
