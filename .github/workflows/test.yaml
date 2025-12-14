@@ -84,6 +84,21 @@ jobs:
         run: |
           pip install -e .[dev]
 
+      - name: Start Bitcoin Regtest
+        run: |
+          docker compose up -d bitcoin
+
+          # Wait for Bitcoin to be ready
+          echo "Waiting for Bitcoin node to be ready..."
+          for i in {1..30}; do
+            if docker compose exec bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
+              echo "Bitcoin node is ready"
+              break
+            fi
+            echo "Attempt $i/30..."
+            sleep 2
+          done
+
       - name: Run jmwallet tests
         working-directory: jmwallet
         run: pytest --junitxml=junit/test-results.xml --cov=jmwallet --cov-report=term-missing --cov-report=xml -v
@@ -203,7 +218,23 @@ jobs:
 
       - name: Install maker dependencies
         working-directory: maker
-        run: pip install -e .[dev]
+        run: |
+          pip install -e .[dev]
+
+      - name: Start Bitcoin Regtest
+        run: |
+          docker compose up -d bitcoin
+
+          # Wait for Bitcoin to be ready
+          echo "Waiting for Bitcoin node to be ready..."
+          for i in {1..30}; do
+            if docker compose exec bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
+              echo "Bitcoin node is ready"
+              break
+            fi
+            echo "Attempt $i/30..."
+            sleep 2
+          done
 
       - name: Run maker tests
         working-directory: maker
