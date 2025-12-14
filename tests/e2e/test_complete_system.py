@@ -596,5 +596,144 @@ async def test_taker_tx_builder():
     assert script.startswith(bytes.fromhex("0014"))  # P2WPKH prefix (OP_0 PUSH20)
 
 
+@pytest.mark.asyncio
+async def test_taker_signing_integration(funded_taker_wallet: WalletService):
+    """
+    Test taker signing integration with real wallet keys.
+
+    This test verifies that:
+    1. The taker can build a CoinJoin transaction
+    2. The taker can correctly find its input indices in the shuffled transaction
+    3. The taker can sign its inputs with proper BIP143 sighash
+    4. The signatures can be added to the transaction
+    """
+    from jmwallet.wallet.signing import deserialize_transaction
+    from taker.tx_builder import (
+        CoinJoinTxBuilder,
+        CoinJoinTxData,
+        TxInput,
+        TxOutput,
+    )
+
+    # Get real UTXOs from wallet
+    utxos = await funded_taker_wallet.get_utxos(0)
+    if not utxos:
+        pytest.skip("No UTXOs available for signing test")
+
+    # Take the first UTXO for testing
+    taker_utxo = utxos[0]
+    print(f"Using UTXO: {taker_utxo.txid}:{taker_utxo.vout} = {taker_utxo.value} sats")
+
+    # Create mock maker UTXOs
+    maker_utxos = [
+        {"txid": "c" * 64, "vout": 0, "value": 1_200_000},
+    ]
+
+    cj_amount = min(taker_utxo.value // 2, 500_000)
+
+    # Build CoinJoin transaction data
+    tx_data = CoinJoinTxData(
+        taker_inputs=[
+            TxInput(
+                txid=taker_utxo.txid,
+                vout=taker_utxo.vout,
+                value=taker_utxo.value,
+            )
+        ],
+        taker_cj_output=TxOutput(
+            address="bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+            value=cj_amount,
+        ),
+        taker_change_output=TxOutput(
+            address="bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+            value=taker_utxo.value - cj_amount - 5000,  # Minus fee
+        ),
+        maker_inputs={
+            "maker1": [
+                TxInput(txid=u["txid"], vout=u["vout"], value=u["value"])
+                for u in maker_utxos
+            ],
+        },
+        maker_cj_outputs={
+            "maker1": TxOutput(
+                address="bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080",
+                value=cj_amount,
+            ),
+        },
+        maker_change_outputs={
+            "maker1": TxOutput(
+                address="bcrt1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3qzf4jry",
+                value=1_200_000 - cj_amount + 1000,  # Maker gets fee
+            ),
+        },
+        cj_amount=cj_amount,
+        total_maker_fee=1000,
+        tx_fee=5000,
+    )
+
+    # Build the transaction
+    builder = CoinJoinTxBuilder(network="regtest")
+    tx_bytes, metadata = builder.build_unsigned_tx(tx_data)
+
+    print(f"Built transaction: {len(tx_bytes)} bytes")
+    print(f"Input owners: {metadata['input_owners']}")
+
+    # Verify the transaction structure
+    tx = deserialize_transaction(tx_bytes)
+    assert len(tx.inputs) == 2  # 1 taker + 1 maker
+
+    # Create a mock taker object to test signing
+    from unittest.mock import MagicMock, patch
+
+    from taker.taker import Taker
+
+    mock_config = MagicMock()
+    mock_config.network.value = "regtest"
+    mock_backend = MagicMock()
+
+    with patch.object(Taker, "__init__", lambda self, *args, **kwargs: None):
+        taker = Taker.__new__(Taker)
+        taker.wallet = funded_taker_wallet
+        taker.backend = mock_backend
+        taker.config = mock_config
+        taker.unsigned_tx = tx_bytes
+        taker.tx_metadata = metadata
+        taker.selected_utxos = [taker_utxo]
+
+        # Sign the inputs
+        signatures = await taker._sign_our_inputs()
+
+        # Verify we got a signature
+        assert len(signatures) == 1, f"Expected 1 signature, got {len(signatures)}"
+
+        sig_info = signatures[0]
+        print(f"Signature for {sig_info['txid']}:{sig_info['vout']}")
+        print(f"  Pubkey: {sig_info['pubkey'][:16]}...")
+        print(f"  Signature length: {len(sig_info['signature']) // 2} bytes")
+
+        # Verify signature structure
+        assert sig_info["txid"] == taker_utxo.txid
+        assert sig_info["vout"] == taker_utxo.vout
+        assert len(sig_info["witness"]) == 2
+
+        # Verify signature is valid DER + sighash
+        sig_bytes = bytes.fromhex(sig_info["signature"])
+        assert len(sig_bytes) > 64  # DER signatures are variable length
+        assert sig_bytes[-1] == 1  # SIGHASH_ALL
+
+        # Test that signatures can be added to transaction
+        all_signatures = {
+            "taker": signatures,
+            "maker1": [],  # Mock empty maker signatures for now
+        }
+
+        # This should not raise even with empty maker sigs
+        signed_tx = builder.add_signatures(tx_bytes, all_signatures, metadata)
+        assert len(signed_tx) > len(tx_bytes)
+        print(f"Signed transaction: {len(signed_tx)} bytes (was {len(tx_bytes)})")
+
+        print("Taker signing integration test PASSED")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

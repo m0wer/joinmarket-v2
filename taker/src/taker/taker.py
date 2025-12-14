@@ -25,7 +25,15 @@ from jmcore.directory_client import DirectoryClient
 from jmcore.models import Offer
 from jmcore.protocol import JM_VERSION
 from jmwallet.backends.base import BlockchainBackend
+from jmwallet.wallet.models import UTXOInfo
 from jmwallet.wallet.service import WalletService
+from jmwallet.wallet.signing import (
+    TransactionSigningError,
+    create_p2wpkh_script_code,
+    create_witness_stack,
+    deserialize_transaction,
+    sign_p2wpkh_input,
+)
 from loguru import logger
 
 from taker.config import Schedule, TakerConfig
@@ -212,6 +220,7 @@ class Taker:
         self.tx_metadata: dict[str, Any] = {}
         self.final_tx: bytes = b""
         self.txid: str = ""
+        self.selected_utxos: list[UTXOInfo] = []  # Taker's selected UTXOs for signing
 
         # Schedule for tumbler-style operations
         self.schedule: Schedule | None = None
@@ -533,6 +542,9 @@ class Taker:
                 logger.error("Failed to select enough UTXOs")
                 return False
 
+            # Store selected UTXOs for signing later
+            self.selected_utxos = selected_utxos
+
             taker_total = sum(u.value for u in selected_utxos)
 
             # Taker change address
@@ -640,11 +652,87 @@ class Taker:
         return True
 
     async def _sign_our_inputs(self) -> list[dict[str, Any]]:
-        """Sign taker's inputs in the transaction."""
-        # This would use jmwallet signing
-        # For now, return placeholder
-        # TODO: Implement actual signing
-        return []
+        """
+        Sign taker's inputs in the transaction.
+
+        Finds the correct input indices in the shuffled transaction by matching
+        txid:vout from selected UTXOs, then signs each input.
+
+        Returns:
+            List of signature info dicts with txid, vout, signature, pubkey, witness
+        """
+        try:
+            if not self.unsigned_tx:
+                logger.error("No unsigned transaction to sign")
+                return []
+
+            if not self.selected_utxos:
+                logger.error("No selected UTXOs to sign")
+                return []
+
+            tx = deserialize_transaction(self.unsigned_tx)
+            signatures_info: list[dict[str, Any]] = []
+
+            # Build a map of (txid, vout) -> input index for the transaction
+            # Note: txid in tx.inputs is little-endian bytes, need to convert
+            input_index_map: dict[tuple[str, int], int] = {}
+            for idx, tx_input in enumerate(tx.inputs):
+                # Convert little-endian txid bytes to big-endian hex string (RPC format)
+                txid_hex = tx_input.txid_le[::-1].hex()
+                input_index_map[(txid_hex, tx_input.vout)] = idx
+
+            # Sign each of our UTXOs
+            for utxo in self.selected_utxos:
+                # Find the input index in the transaction
+                utxo_key = (utxo.txid, utxo.vout)
+                if utxo_key not in input_index_map:
+                    logger.error(f"UTXO {utxo.txid}:{utxo.vout} not found in transaction inputs")
+                    continue
+
+                input_index = input_index_map[utxo_key]
+
+                # Get the key for this address
+                key = self.wallet.get_key_for_address(utxo.address)
+                if not key:
+                    raise TransactionSigningError(f"Missing key for address {utxo.address}")
+
+                priv_key = key.private_key
+                pubkey_bytes = key.get_public_key_bytes(compressed=True)
+
+                # Create script code and sign
+                script_code = create_p2wpkh_script_code(pubkey_bytes)
+                signature = sign_p2wpkh_input(
+                    tx=tx,
+                    input_index=input_index,
+                    script_code=script_code,
+                    value=utxo.value,
+                    private_key=priv_key,
+                )
+
+                # Create witness stack
+                witness = create_witness_stack(signature, pubkey_bytes)
+
+                signatures_info.append(
+                    {
+                        "txid": utxo.txid,
+                        "vout": utxo.vout,
+                        "signature": signature.hex(),
+                        "pubkey": pubkey_bytes.hex(),
+                        "witness": [item.hex() for item in witness],
+                    }
+                )
+
+                logger.debug(f"Signed input {input_index} for UTXO {utxo.txid}:{utxo.vout}")
+
+            logger.info(f"Signed {len(signatures_info)} taker inputs")
+            return signatures_info
+
+        except TransactionSigningError as e:
+            logger.error(f"Signing error: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to sign transaction: {e}")
+            return []
 
     async def _phase_broadcast(self) -> str:
         """Broadcast the signed transaction."""
