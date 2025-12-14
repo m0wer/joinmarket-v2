@@ -84,15 +84,26 @@ jobs:
         run: |
           pip install -e .[dev]
 
-      - name: Start Bitcoin Regtest
+      - name: Start Bitcoin Regtest and Neutrino
         run: |
-          docker compose up -d bitcoin
+          docker compose --profile neutrino up -d bitcoin neutrino
 
           # Wait for Bitcoin to be ready
           echo "Waiting for Bitcoin node to be ready..."
           for i in {1..30}; do
             if docker compose exec bitcoin bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockchaininfo 2>/dev/null; then
               echo "Bitcoin node is ready"
+              break
+            fi
+            echo "Attempt $i/30..."
+            sleep 2
+          done
+
+          # Wait for Neutrino to be ready
+          echo "Waiting for Neutrino server to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8334/v1/status >/dev/null 2>&1; then
+              echo "Neutrino server is ready"
               break
             fi
             echo "Attempt $i/30..."
