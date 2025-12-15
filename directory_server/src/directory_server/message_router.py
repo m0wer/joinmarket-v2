@@ -6,7 +6,7 @@ Implements Single Responsibility Principle: only handles message routing.
 
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 
 from jmcore.models import MessageEnvelope, NetworkType, PeerInfo
 from jmcore.protocol import MessageType, create_peerlist_entry, parse_jm_message
@@ -65,25 +65,24 @@ class MessageRouter:
             logger.warning(f"Unknown peer sending public message: {from_key}")
             return
 
-        connected_peers = self.peer_registry.get_all_connected(from_peer.network)
-
         # Pre-serialize envelope once instead of per-peer
         envelope_bytes = envelope.to_bytes()
 
-        # Build list of (peer_key, nick) tuples to send to
-        targets: list[tuple[str, str | None]] = []
-        for peer in connected_peers:
-            peer_key = (
-                peer.nick if peer.location_string == "NOT-SERVING-ONION" else peer.location_string
-            )
-            if peer_key == from_key:
-                continue
-            targets.append((peer_key, peer.nick))
+        # Use generator to avoid building full target list in memory
+        def target_generator() -> Iterator[tuple[str, str | None]]:
+            for peer in self.peer_registry.iter_connected(from_peer.network):
+                peer_key = (
+                    peer.nick
+                    if peer.location_string == "NOT-SERVING-ONION"
+                    else peer.location_string
+                )
+                if peer_key != from_key:
+                    yield (peer_key, peer.nick)
 
         # Execute sends in batches to limit memory usage
-        await self._batched_broadcast(targets, envelope_bytes)
+        sent_count = await self._batched_broadcast_iter(target_generator(), envelope_bytes)
 
-        logger.trace(f"Broadcasted public message from {from_nick} to {len(targets)} peers")
+        logger.trace(f"Broadcasted public message from {from_nick} to {sent_count} peers")
 
     async def _safe_send(self, peer_key: str, data: bytes, nick: str | None = None) -> None:
         """Send with exception handling to prevent one failed send from affecting others."""
@@ -104,24 +103,55 @@ class MessageRouter:
                 except Exception as cleanup_err:
                     logger.trace(f"Error in on_send_failed callback: {cleanup_err}")
 
-    async def _batched_broadcast(self, targets: list[tuple[str, str | None]], data: bytes) -> None:
+    async def _batched_broadcast(self, targets: list[tuple[str, str | None]], data: bytes) -> int:
         """
         Broadcast data to targets in batches to limit memory usage.
 
         Instead of creating all coroutines at once (which caused 2GB+ memory usage),
         we process in batches of broadcast_batch_size to keep memory bounded.
+
+        Returns the number of targets processed.
+        """
+        return await self._batched_broadcast_iter(iter(targets), data)
+
+    async def _batched_broadcast_iter(
+        self, targets: Iterator[tuple[str, str | None]], data: bytes
+    ) -> int:
+        """
+        Broadcast data to targets from an iterator in batches.
+
+        This is the memory-efficient version that consumes targets lazily,
+        only materializing batch_size items at a time.
+
+        Returns the number of targets processed.
         """
         # Clear failed peers set at start of broadcast to allow fresh attempts
         # while still preventing repeated attempts within this broadcast
         self._failed_peers.clear()
 
-        for i in range(0, len(targets), self.broadcast_batch_size):
-            batch = targets[i : i + self.broadcast_batch_size]
-            # Filter out peers that have already failed in this broadcast
-            batch = [(pk, nick) for pk, nick in batch if pk not in self._failed_peers]
-            tasks = [self._safe_send(peer_key, data, nick) for peer_key, nick in batch]
-            if tasks:
+        total_sent = 0
+        batch: list[tuple[str, str | None]] = []
+
+        for target in targets:
+            peer_key, nick = target
+            # Skip peers that have already failed in this broadcast
+            if peer_key in self._failed_peers:
+                continue
+            batch.append(target)
+
+            if len(batch) >= self.broadcast_batch_size:
+                tasks = [self._safe_send(pk, data, n) for pk, n in batch]
                 await asyncio.gather(*tasks)
+                total_sent += len(batch)
+                batch = []
+
+        # Process remaining items
+        if batch:
+            tasks = [self._safe_send(pk, data, n) for pk, n in batch]
+            await asyncio.gather(*tasks)
+            total_sent += len(batch)
+
+        return total_sent
 
     async def _handle_private_message(self, envelope: MessageEnvelope, from_key: str) -> None:
         parsed = parse_jm_message(envelope.payload)
@@ -215,20 +245,18 @@ class MessageRouter:
         entry = create_peerlist_entry(peer.nick, peer.location_string, disconnected=True)
         envelope = MessageEnvelope(message_type=MessageType.PEERLIST, payload=entry)
 
-        connected_peers = self.peer_registry.get_all_connected(network)
-
         # Pre-serialize envelope once instead of per-peer
         envelope_bytes = envelope.to_bytes()
 
-        # Build list of (peer_key, nick) tuples to send to
-        targets: list[tuple[str, str | None]] = []
-        for p in connected_peers:
-            if p.location_string == peer_location:
-                continue
-            peer_key = p.nick if p.location_string == "NOT-SERVING-ONION" else p.location_string
-            targets.append((peer_key, p.nick))
+        # Use generator to avoid building full target list in memory
+        def target_generator() -> Iterator[tuple[str, str | None]]:
+            for p in self.peer_registry.iter_connected(network):
+                if p.location_string == peer_location:
+                    continue
+                peer_key = p.nick if p.location_string == "NOT-SERVING-ONION" else p.location_string
+                yield (peer_key, p.nick)
 
         # Execute sends in batches to limit memory usage
-        await self._batched_broadcast(targets, envelope_bytes)
+        sent_count = await self._batched_broadcast_iter(target_generator(), envelope_bytes)
 
-        logger.info(f"Broadcasted disconnect for {peer.nick} to {len(targets)} peers")
+        logger.info(f"Broadcasted disconnect for {peer.nick} to {sent_count} peers")

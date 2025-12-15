@@ -75,6 +75,10 @@ class PeerRegistry:
             ):
                 yield p
 
+    def iter_connected(self, network: NetworkType | None = None) -> Iterator[PeerInfo]:
+        """Public memory-efficient iterator over connected peers."""
+        return self._iter_connected(network)
+
     def get_all_connected(self, network: NetworkType | None = None) -> list[PeerInfo]:
         return list(self._iter_connected(network))
 
