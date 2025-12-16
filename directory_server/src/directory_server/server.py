@@ -217,13 +217,18 @@ class DirectoryServer:
         """
         Called when sending to a peer fails.
 
-        Removes the peer from the connection mapping to prevent further
-        send attempts to this dead connection. The actual cleanup will
-        happen when the connection handler detects the disconnection.
+        Removes the peer from both the connection mapping and the registry
+        to prevent further send attempts to this dead connection.
         """
         if peer_key in self.peer_key_to_conn_id:
             logger.debug(f"Removing failed peer mapping: {peer_key}")
             del self.peer_key_to_conn_id[peer_key]
+
+        # Also unregister from peer registry to prevent further routing attempts
+        peer_info = self.peer_registry.get_by_key(peer_key)
+        if peer_info:
+            logger.debug(f"Unregistering failed peer: {peer_key}")
+            self.peer_registry.unregister(peer_key)
 
     def is_healthy(self) -> bool:
         return (
