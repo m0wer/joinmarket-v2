@@ -31,47 +31,25 @@ services:
       - ./shared:/shared
     networks:
       - jm-network
-    labels:
-      ofelia.enabled: "true"
-      ofelia.job-exec.mining.schedule: "@every 10s"
-      ofelia.job-exec.mining.command: |
-        sh -c '
-        set -e
-        export PATH=/usr/local/bin:/usr/bin:/bin
-
-        blockcount=$$(bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getblockcount 2>/dev/null || echo "0")
-
-        # Initial setup - mine to mature coinbase
-        if [ "$$blockcount" -lt 101 ]; then
-          echo "Initial setup: mining block $$blockcount/101"
-          bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test createwallet "test" 2>/dev/null || true
-          addr=$$(bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getnewaddress)
-          bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test generatetoaddress 10 "$$addr"
-          exit 0
-        fi
-
-        # Mine mempool transactions
-        mempool_count=$$(bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getmempoolinfo | jq -r .size 2>/dev/null || echo "0")
-
-        if [ "$$mempool_count" -gt 0 ]; then
-          echo "Mining block with $$mempool_count transactions"
-          addr=$$(bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test getnewaddress)
-          bitcoin-cli -chain=regtest -rpcport=18443 -rpcuser=test -rpcpassword=test generatetoaddress 1 "$$addr"
-        fi
-        '
-
-  # Scheduler for auto-mining
-  ofelia:
-    image: mcuadros/ofelia:latest
-    container_name: jm-ofelia
+  # Auto-miner for regtest (mines initial blocks and mempool transactions)
+  miner:
+    image: kylemanna/bitcoind:latest
+    container_name: jm-miner
     restart: unless-stopped
-    command: daemon --docker
+    entrypoint: ["/bin/sh", "/scripts/regtest-miner.sh"]
+    environment:
+      - RPC_HOST=jm-bitcoin
+      - RPC_PORT=18443
+      - RPC_USER=test
+      - RPC_PASSWORD=test
+      - MINE_INTERVAL=10
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    depends_on:
-      - bitcoin
+      - ./scripts:/scripts:ro
     networks:
       - jm-network
+    depends_on:
+      bitcoin:
+        condition: service_healthy
 
   # JoinMarket directory server
   directory:
