@@ -1,6 +1,34 @@
+# JoinMarket Refactor - Unified Docker Compose
+#
+# Profiles:
+#   (default)  - Core services: bitcoin, miner, directory, orderbook-watcher
+#   maker      - Add maker bot
+#   taker      - Add taker client
+#   e2e        - E2E testing setup with 2 makers (our implementation)
+#   reference  - Reference JoinMarket (JAM) for compatibility testing
+#   all        - Everything: e2e + reference (for full test suite)
+#   neutrino   - Add neutrino light client backend
+#
+# Usage:
+#   docker compose up -d                           # Core services only
+#   docker compose --profile maker up -d           # Add maker bot
+#   docker compose --profile e2e up -d             # E2E tests (our implementation)
+#   docker compose --profile reference up -d       # Reference compatibility tests
+#   docker compose --profile all up -d             # Full test suite (all tests)
+#
+# Run full test suite:
+#   docker compose --profile all up -d --build
+#   pytest -lv --cov=jmcore --cov=jmwallet --cov=directory_server \
+#          --cov=orderbook_watcher --cov=maker --cov=taker \
+#          jmcore orderbook_watcher directory_server jmwallet maker taker tests
+#   docker compose --profile all down -v
+
 services:
+  # ============================================================================
+  # Core Services (always available)
+  # ============================================================================
+
   # Bitcoin Core regtest node
-  # Using kylemanna/bitcoind:latest which is based on v29.1
   bitcoin:
     image: kylemanna/bitcoind:latest
     container_name: jm-bitcoin
@@ -31,6 +59,7 @@ services:
       - ./shared:/shared
     networks:
       - jm-network
+
   # Auto-miner for regtest (mines initial blocks and mempool transactions)
   miner:
     image: kylemanna/bitcoind:latest
@@ -62,6 +91,7 @@ services:
       - NETWORK=regtest
       - LOG_LEVEL=INFO
       - PORT=5222
+      - HOST=0.0.0.0
     ports:
       - "5222:5222"
     networks:
@@ -75,7 +105,7 @@ services:
       bitcoin:
         condition: service_healthy
 
-  # Orderbook watcher (for monitoring)
+  # Orderbook watcher (web UI for monitoring)
   orderbook-watcher:
     build:
       context: .
@@ -94,13 +124,16 @@ services:
       directory:
         condition: service_healthy
 
-  # Maker bot (to be run manually for testing)
+  # ============================================================================
+  # Maker Bot (profile: maker)
+  # ============================================================================
+
   maker:
     build:
       context: .
       dockerfile: maker/Dockerfile
     container_name: jm-maker
-    restart: "no"  # Manual start only
+    restart: "no"
     environment:
       - MNEMONIC=${MAKER_MNEMONIC:-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about}
       - NETWORK=regtest
@@ -121,15 +154,18 @@ services:
       directory:
         condition: service_healthy
     profiles:
-      - maker  # Only start with: docker-compose --profile maker up
+      - maker
 
-  # Taker client (to be run manually for testing)
+  # ============================================================================
+  # Taker Client (profile: taker)
+  # ============================================================================
+
   taker:
     build:
       context: .
       dockerfile: taker/Dockerfile
     container_name: jm-taker
-    restart: "no"  # Manual start only
+    restart: "no"
     environment:
       - MNEMONIC=${TAKER_MNEMONIC:-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about}
       - NETWORK=regtest
@@ -151,9 +187,155 @@ services:
       directory:
         condition: service_healthy
     profiles:
-      - taker  # Only start with: docker-compose --profile taker up
+      - taker
 
-  # Neutrino light client (alternative to Bitcoin Core)
+  # ============================================================================
+  # E2E Test Setup (profile: e2e)
+  # Two makers + infrastructure for automated testing
+  # ============================================================================
+
+  # Maker 1 for e2e tests
+  maker1:
+    build:
+      context: .
+      dockerfile: maker/Dockerfile
+    container_name: jm-maker1
+    restart: unless-stopped
+    environment:
+      - MNEMONIC=avoid whisper mesh corn already blur sudden fine planet chicken hover sniff
+      - NETWORK=regtest
+      - BACKEND_TYPE=bitcoin_core
+      - BITCOIN_RPC_URL=http://jm-bitcoin:18443
+      - BITCOIN_RPC_USER=test
+      - BITCOIN_RPC_PASSWORD=test
+      - DIRECTORY_SERVERS=jm-directory:5222
+      - LOG_LEVEL=DEBUG
+      - MIN_SIZE=10000
+      - TX_FEE_CONTRIBUTION=500
+      - CJ_FEE_RELATIVE=0.0003
+    networks:
+      - jm-network
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+      directory:
+        condition: service_healthy
+    profiles:
+      - e2e
+      - reference
+      - all
+
+  # Maker 2 for e2e tests
+  maker2:
+    build:
+      context: .
+      dockerfile: maker/Dockerfile
+    container_name: jm-maker2
+    restart: unless-stopped
+    environment:
+      - MNEMONIC=minute faint grape plate stock mercy tent world space opera apple rocket
+      - NETWORK=regtest
+      - BACKEND_TYPE=bitcoin_core
+      - BITCOIN_RPC_URL=http://jm-bitcoin:18443
+      - BITCOIN_RPC_USER=test
+      - BITCOIN_RPC_PASSWORD=test
+      - DIRECTORY_SERVERS=jm-directory:5222
+      - LOG_LEVEL=DEBUG
+      - MIN_SIZE=10000
+      - TX_FEE_CONTRIBUTION=500
+      - CJ_FEE_RELATIVE=0.00025
+    networks:
+      - jm-network
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+      directory:
+        condition: service_healthy
+    profiles:
+      - e2e
+      - reference
+      - all
+
+  # ============================================================================
+  # Reference JoinMarket Implementation (profile: reference)
+  # For compatibility testing with upstream JAM
+  # ============================================================================
+
+  # Tor hidden service for directory server (exposes directory via .onion)
+  # Uses pre-generated keys for deterministic onion address
+  tor:
+    image: goldy/tor-hidden-service:latest
+    container_name: jm-tor
+    restart: unless-stopped
+    environment:
+      # Create hidden service named "directory" forwarding port 5222
+      DIRECTORY_TOR_SERVICE_HOSTS: "5222:jm-directory:5222"
+      DIRECTORY_TOR_SERVICE_VERSION: "3"
+    volumes:
+      # Use pre-generated keys for deterministic onion address
+      - ./tests/e2e/reference/tor_keys:/var/lib/tor/hidden_service/directory:ro
+    networks:
+      - jm-network
+    depends_on:
+      directory:
+        condition: service_healthy
+    profiles:
+      - reference
+      - all
+
+  # Reference JoinMarket implementation (jam-standalone)
+  # Contains internal Tor daemon for onion messaging
+  jam:
+    image: ghcr.io/joinmarket-webui/jam-standalone:v0.4.0-clientserver-v0.9.11
+    container_name: jm-jam
+    environment:
+      - JM_RPC_HOST=jm-bitcoin
+      - JM_RPC_PORT=18443
+      - JM_RPC_USER=test
+      - JM_RPC_PASSWORD=test
+      - APP_USER=admin
+      - APP_PASSWORD=admin
+      - ENSURE_WALLET=false
+      - REMOVE_LOCK_FILES=true
+      - RESTORE_DEFAULT_CONFIG=false
+      # Generous fee limits for testing
+      - JM_MAX_CJ_FEE_ABS=100000
+      - JM_MAX_CJ_FEE_REL=0.01
+    volumes:
+      - jam-data:/root/.joinmarket
+      # Mount custom config with pre-configured onion address
+      - ./tests/e2e/reference/joinmarket.cfg:/root/.joinmarket/joinmarket.cfg:ro
+      # Mount wallet creation automation script
+      - ./tests/e2e/reference/create_wallet.exp:/scripts/create_wallet.exp:ro
+    networks:
+      - jm-network
+    deploy:
+      resources:
+        limits:
+          cpus: "3"
+          memory: 2G
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "timeout 5 bash -c '</dev/tcp/127.0.0.1/80'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    depends_on:
+      bitcoin:
+        condition: service_healthy
+      directory:
+        condition: service_healthy
+      tor:
+        condition: service_started
+    profiles:
+      - reference
+      - all
+
+  # ============================================================================
+  # Neutrino Light Client (profile: neutrino)
+  # ============================================================================
+
   neutrino:
     build:
       context: ./neutrino_server
@@ -175,6 +357,8 @@ services:
     depends_on:
       bitcoin:
         condition: service_healthy
+    profiles:
+      - neutrino
 
   # Maker with neutrino backend
   maker-neutrino:
@@ -234,6 +418,7 @@ services:
 volumes:
   bitcoin-data:
   neutrino-data:
+  jam-data:
 
 networks:
   jm-network:

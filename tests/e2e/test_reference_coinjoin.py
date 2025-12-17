@@ -9,10 +9,15 @@ JoinMarket client-server by:
 
 Prerequisites:
 - Docker and Docker Compose installed
-- docker-compose.reference.yml services running
+- Run: docker compose --profile reference up -d
 
 Usage:
     pytest tests/e2e/test_reference_coinjoin.py -v -s --timeout=600
+
+Note: These tests are SKIPPED automatically if the reference services (jam, tor)
+are not running. This allows running the full test suite without failures:
+
+    pytest -lv --cov=... jmcore orderbook_watcher directory_server jmwallet maker taker tests
 """
 
 from __future__ import annotations
@@ -29,31 +34,29 @@ import pytest
 from loguru import logger
 
 
-# Longer timeouts for reference implementation tests
+# Timeouts for reference implementation tests
 STARTUP_TIMEOUT = 180  # 3 minutes for all services to start
 COINJOIN_TIMEOUT = 300  # 5 minutes for coinjoin to complete
 WALLET_FUND_TIMEOUT = 120  # 2 minutes for wallet funding
 
-
-# Project name to distinguish reference compose from main compose
-REFERENCE_PROJECT_NAME = "jm-reference"
+# Pre-generated deterministic onion address for our directory server
+# Keys stored in tests/e2e/reference/tor_keys/
+DIRECTORY_ONION = "tsc2niuqhhnl35q4tzpyyuogcxscgxhotjrk3ldaynfsgysoctlgwxqd.onion"
 
 
 def get_compose_file() -> Path:
-    """Get path to reference docker-compose file."""
-    return Path(__file__).parent.parent.parent / "docker-compose.reference.yml"
+    """Get path to docker-compose file."""
+    return Path(__file__).parent.parent.parent / "docker-compose.yml"
 
 
 def run_compose_cmd(
     args: list[str], check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    """Run a docker compose command with the reference project name."""
+    """Run a docker compose command."""
     compose_file = get_compose_file()
     cmd = [
         "docker",
         "compose",
-        "-p",
-        REFERENCE_PROJECT_NAME,
         "-f",
         str(compose_file),
     ] + args
@@ -67,8 +70,6 @@ def run_jam_cmd(args: list[str], timeout: int = 60) -> subprocess.CompletedProce
     cmd = [
         "docker",
         "compose",
-        "-p",
-        REFERENCE_PROJECT_NAME,
         "-f",
         str(compose_file),
         "exec",
@@ -87,8 +88,6 @@ def run_bitcoin_cmd(args: list[str]) -> subprocess.CompletedProcess[str]:
     cmd = [
         "docker",
         "compose",
-        "-p",
-        REFERENCE_PROJECT_NAME,
         "-f",
         str(compose_file),
         "exec",
@@ -104,7 +103,7 @@ def run_bitcoin_cmd(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 async def rpc_call(method: str, params: list[Any] | None = None) -> Any:
     """Make Bitcoin RPC call."""
-    url = os.getenv("BITCOIN_RPC_URL", "http://127.0.0.1:28443")
+    url = os.getenv("BITCOIN_RPC_URL", "http://127.0.0.1:18443")
     payload = {
         "jsonrpc": "1.0",
         "id": "test",
@@ -123,49 +122,20 @@ async def rpc_call(method: str, params: list[Any] | None = None) -> Any:
         return data.get("result")
 
 
-def get_tor_onion_address() -> str | None:
-    """Get the Tor hidden service address for our directory server."""
-    result = run_compose_cmd(
-        ["exec", "-T", "tor", "cat", "/var/lib/tor/hidden_service/directory/hostname"],
-        check=False,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        onion = result.stdout.strip()
-        logger.info(f"Directory server onion address: {onion}")
-        return onion
-    return None
+def is_jam_running() -> bool:
+    """Check if the JAM container is running."""
+    result = run_compose_cmd(["ps", "-q", "jam"], check=False)
+    return bool(result.stdout.strip())
 
 
-def update_jam_config_with_onion(onion_address: str) -> bool:
-    """Update jam's joinmarket.cfg with the correct onion address."""
-    config_path = Path(__file__).parent / "reference" / "joinmarket.cfg"
-
-    if not config_path.exists():
-        logger.error(f"Config file not found: {config_path}")
-        return False
-
-    content = config_path.read_text()
-    # Replace the placeholder with actual onion address
-    new_content = content.replace(
-        "directory_nodes = placeholder.onion:5222",
-        f"directory_nodes = {onion_address}:5222",
-    )
-
-    if new_content == content:
-        # Check if already updated
-        if onion_address in content:
-            logger.info("Config already has correct onion address")
-            return True
-        logger.warning("Could not find placeholder in config")
-        return False
-
-    config_path.write_text(new_content)
-    logger.info(f"Updated config with onion address: {onion_address}")
-    return True
+def is_tor_running() -> bool:
+    """Check if the Tor container is running."""
+    result = run_compose_cmd(["ps", "-q", "tor"], check=False)
+    return bool(result.stdout.strip())
 
 
 def wait_for_services(timeout: int = STARTUP_TIMEOUT) -> bool:
-    """Wait for all services to be healthy."""
+    """Wait for all reference profile services to be healthy."""
     start = time.time()
     services = ["bitcoin", "directory", "tor", "maker1", "maker2", "jam"]
 
@@ -191,18 +161,6 @@ def wait_for_services(timeout: int = STARTUP_TIMEOUT) -> bool:
     return False
 
 
-def wait_for_tor_onion(timeout: int = 120) -> str | None:
-    """Wait for Tor to generate the onion address."""
-    start = time.time()
-    while time.time() - start < timeout:
-        onion = get_tor_onion_address()
-        if onion and onion.endswith(".onion"):
-            return onion
-        logger.debug("Waiting for Tor to generate onion address...")
-        time.sleep(5)
-    return None
-
-
 def create_jam_wallet(
     wallet_name: str = "test_wallet.jmdat", password: str = "testpassword123"
 ) -> bool:
@@ -223,7 +181,7 @@ def create_jam_wallet(
     # Check if expect is available
     result = run_jam_cmd(["which", "expect"], timeout=10)
     if result.returncode != 0:
-        # Try to install expect (Alpine uses apk, Debian uses apt)
+        # Try to install expect
         logger.info("Installing expect...")
         run_jam_cmd(["apt-get", "update"], timeout=60)
         run_jam_cmd(["apt-get", "install", "-y", "expect"], timeout=60)
@@ -245,7 +203,7 @@ def create_jam_wallet(
     return True
 
 
-def get_jam_wallet_address_with_password(
+def get_jam_wallet_address(
     wallet_name: str = "test_wallet.jmdat",
     password: str = "testpassword123",
     mixdepth: int = 0,
@@ -285,10 +243,9 @@ def get_jam_wallet_address_with_password(
         return None
 
     # Parse output to find first NEW address in external branch of mixdepth 0
-    # Format: m/84'/1'/0'/0/0    bcrt1q...    0.00000000    new
     lines = result.stdout.split("\n")
     for line in lines:
-        # Look for external addresses (0'/0/) that are "new"
+        # Look for external addresses that are "new"
         if f"/{mixdepth}'/0/" in line and "new" in line.lower():
             parts = line.split()
             for part in parts:
@@ -323,70 +280,60 @@ def fund_wallet_address(address: str, amount_btc: float = 1.0) -> bool:
     return True
 
 
+# Skip all tests in this module if JAM is not running
+pytestmark = pytest.mark.skipif(
+    not is_jam_running(),
+    reason="Reference services not running. Start with: docker compose --profile reference up -d",
+)
+
+
 @pytest.fixture(scope="module")
 def reference_services():
     """
     Fixture for reference test services using docker compose.
 
-    This fixture checks if the reference services (docker-compose.reference.yml)
-    are already running. If not, tests will be SKIPPED.
+    This fixture requires reference services to already be running.
+    Tests are automatically skipped if services aren't available.
 
-    To run these tests, start the services manually:
-        docker compose -p jm-reference -f docker-compose.reference.yml up -d
-
-    Or use the test-reference-coinjoin GitHub Actions workflow.
+    To run these tests:
+        docker compose --profile reference up -d
+        pytest tests/e2e/test_reference_coinjoin.py -v -s
     """
     compose_file = get_compose_file()
 
     if not compose_file.exists():
         pytest.skip(f"Compose file not found: {compose_file}")
 
-    # Check if services are already running
-    result = run_compose_cmd(["ps", "-q"], check=False)
-    services_running = bool(result.stdout.strip())
-
-    if not services_running:
+    # Verify JAM and Tor are running (already checked by pytestmark, but double-check)
+    if not is_jam_running():
         pytest.skip(
-            "Reference services not running. "
-            "Start them manually with: "
-            f"docker compose -p {REFERENCE_PROJECT_NAME} -f docker-compose.reference.yml up -d"
+            "JAM container not running. "
+            "Start with: docker compose --profile reference up -d"
+        )
+
+    if not is_tor_running():
+        pytest.skip(
+            "Tor container not running. "
+            "Start with: docker compose --profile reference up -d"
         )
 
     # Wait for services to be healthy
-    if not wait_for_services():
-        # Show logs on failure
-        run_compose_cmd(["logs", "--tail=100"])
+    if not wait_for_services(
+        timeout=60
+    ):  # Shorter timeout since we expect them running
         pytest.skip(
-            "Reference services failed to become healthy. "
-            "Check service logs with: "
-            f"docker compose -p {REFERENCE_PROJECT_NAME} -f docker-compose.reference.yml logs"
+            "Reference services not healthy. "
+            "Check logs with: docker compose --profile reference logs"
         )
 
-    # Wait for Tor to generate onion address
-    logger.info("Waiting for Tor hidden service...")
-    onion = wait_for_tor_onion()
-    if not onion:
-        pytest.skip("Tor failed to generate onion address - skipping reference tests")
-
-    # Update jam config with onion address
-    if not update_jam_config_with_onion(onion):
-        pytest.skip("Failed to update jam config with onion address")
-
-    # Restart jam to pick up new config
-    logger.info("Restarting jam with updated config...")
-    run_compose_cmd(["restart", "jam"])
-    time.sleep(10)  # Give jam time to restart
-
     yield {
-        "onion_address": onion,
-        "services_started": not services_running,
+        "onion_address": DIRECTORY_ONION,
     }
 
-    # Cleanup: only stop services if we started them
-    # In CI, we might want to keep them for debugging
+    # Cleanup is optional - tests can leave services running for debugging
     if os.getenv("CLEANUP_SERVICES", "false").lower() == "true":
         logger.info("Stopping reference test services...")
-        run_compose_cmd(["down", "-v"])
+        run_compose_cmd(["--profile", "reference", "down", "-v"])
 
 
 @pytest.mark.asyncio
@@ -400,9 +347,6 @@ async def test_services_healthy(reference_services):
     info = result.stdout
     assert "regtest" in info.lower(), "Should be regtest network"
     logger.info("Bitcoin Core is healthy")
-
-    # Check directory server via health endpoint
-    # (Our directory server has a health check on port 8080)
 
     # Check makers are connected to directory
     result = run_compose_cmd(["logs", "--tail=20", "maker1"], check=False)
@@ -444,8 +388,6 @@ async def test_jam_can_connect_to_directory(reference_services):
     if not connection_success:
         logger.warning(f"Jam logs: {logs}")
 
-    # This test may fail if there are protocol compatibility issues
-    # Log the status but don't fail immediately
     logger.info(f"Jam connection status from logs: {connection_success}")
 
 
@@ -458,7 +400,7 @@ async def test_complete_reference_coinjoin(reference_services):
     This test:
     1. Creates a wallet in jam using expect automation
     2. Funds the wallet with regtest coins
-    3. Attempts to initiate a coinjoin with our makers
+    3. Verifies makers are advertising offers
 
     Note: Full coinjoin completion requires protocol compatibility.
     This test verifies the setup and wallet creation automation work.
@@ -477,27 +419,15 @@ async def test_complete_reference_coinjoin(reference_services):
     wallet_created = create_jam_wallet(wallet_name, wallet_password)
 
     if not wallet_created:
-        # If expect-based creation failed, log instructions for manual setup
         logger.warning("Automated wallet creation failed.")
-        logger.info("Manual steps to create wallet:")
-        logger.info("  docker compose -f docker-compose.reference.yml exec jam bash")
-        logger.info(
-            "  python /src/scripts/wallet-tool.py --datadir=/root/.joinmarket generate"
-        )
         pytest.skip("Wallet creation requires manual intervention")
 
     # Step 2: Get a receiving address
     logger.info("Step 2: Getting wallet address...")
-    address = get_jam_wallet_address_with_password(wallet_name, wallet_password, 0)
+    address = get_jam_wallet_address(wallet_name, wallet_password, 0)
 
     if not address:
         logger.error("Failed to get wallet address")
-        # Try alternative: display wallet info
-        result = run_jam_cmd(
-            ["ls", "-la", "/root/.joinmarket/wallets/"],
-            timeout=30,
-        )
-        logger.info(f"Wallet directory contents: {result.stdout}")
         pytest.skip("Could not get wallet address")
 
     logger.info(f"Got wallet address: {address}")
@@ -523,35 +453,19 @@ async def test_complete_reference_coinjoin(reference_services):
     result = run_compose_cmd(["logs", "--tail=100", "maker2"], check=False)
     logger.info(f"Maker2 recent logs:\n{result.stdout[-2000:]}")
 
-    # Step 5: Attempt coinjoin (this may fail due to protocol differences)
-    # For now, just verify the setup works - full coinjoin is complex
-    logger.info("Step 5: Wallet setup complete!")
-    logger.info("To manually test coinjoin, run:")
-    logger.info("  docker compose -f docker-compose.reference.yml exec jam bash")
-    logger.info(
-        f"  echo '{wallet_password}' | python /src/scripts/sendpayment.py "
-        f"--datadir=/root/.joinmarket --wallet-password-stdin "
-        f"-N 2 -m 0 /root/.joinmarket/wallets/{wallet_name} "
-        f"10000000 <destination_address>"
-    )
-
-    # Test passes if we got this far - wallet creation and funding worked
     logger.info("Reference coinjoin setup test PASSED")
 
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(900)
-@pytest.mark.skip(reason="Full coinjoin requires protocol compatibility - run manually")
 async def test_execute_reference_coinjoin(reference_services):
     """
     Actually execute a coinjoin using the reference taker.
 
-    This test is skipped by default as it requires:
+    This test requires:
     1. Full protocol compatibility between our implementation and reference
     2. Properly funded maker wallets
     3. Long timeout for Tor connections
-
-    Run manually when testing protocol compatibility.
     """
     wallet_name = "test_wallet.jmdat"
     wallet_password = "testpassword123"
@@ -560,11 +474,11 @@ async def test_execute_reference_coinjoin(reference_services):
     wallet_created = create_jam_wallet(wallet_name, wallet_password)
     assert wallet_created, "Wallet must exist"
 
-    address = get_jam_wallet_address_with_password(wallet_name, wallet_password, 0)
+    address = get_jam_wallet_address(wallet_name, wallet_password, 0)
     assert address, "Must have wallet address"
 
     # Get destination address (use mixdepth 1)
-    dest_address = get_jam_wallet_address_with_password(wallet_name, wallet_password, 1)
+    dest_address = get_jam_wallet_address(wallet_name, wallet_password, 1)
     if not dest_address:
         # Create a new address in Bitcoin Core as fallback
         result = run_bitcoin_cmd(["getnewaddress", "", "bech32"])
