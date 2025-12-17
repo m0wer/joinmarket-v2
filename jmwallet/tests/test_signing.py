@@ -214,6 +214,7 @@ class TestSigning:
         pubkey = test_key.get_public_key_bytes(compressed=True)
         script_code = create_p2wpkh_script_code(pubkey)
 
+        # Pass the coincurve PrivateKey directly
         signature = sign_p2wpkh_input(
             tx=tx,
             input_index=0,
@@ -256,7 +257,7 @@ class TestSignatureVerification:
 
     def test_signature_deterministic(self, test_mnemonic):
         """Signing same transaction twice should produce same signature
-        (for same k-value, which cryptography library handles)."""
+        (coincurve uses RFC 6979 deterministic k)."""
         seed = mnemonic_to_seed(test_mnemonic)
         master = HDKey.from_seed(seed)
         key = master.derive("m/84'/0'/0'/0/0")
@@ -283,8 +284,6 @@ class TestSignatureVerification:
         sig1 = sign_p2wpkh_input(tx, 0, script_code, 100000, key.private_key)
         sig2 = sign_p2wpkh_input(tx, 0, script_code, 100000, key.private_key)
 
-        # Note: ECDSA with RFC 6979 deterministic k should give same sig
-        # but cryptography library may use random k
-        # Just verify both are valid signatures
+        # coincurve uses RFC 6979 deterministic k, so signatures should be identical
+        assert sig1 == sig2
         assert len(sig1) > 64
-        assert len(sig2) > 64

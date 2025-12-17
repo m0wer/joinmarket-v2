@@ -7,8 +7,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, utils
+from coincurve import PrivateKey
 
 
 class TransactionSigningError(Exception):
@@ -176,26 +175,29 @@ def sign_p2wpkh_input(
     input_index: int,
     script_code: bytes,
     value: int,
-    private_key: ec.EllipticCurvePrivateKey,
+    private_key: PrivateKey,
     sighash_type: int = 1,
 ) -> bytes:
+    """Sign a P2WPKH input using coincurve.
+
+    Args:
+        tx: The transaction to sign
+        input_index: Index of the input to sign
+        script_code: The scriptCode for signing (P2PKH script for P2WPKH)
+        value: The value of the input being spent (in satoshis)
+        private_key: coincurve PrivateKey instance
+        sighash_type: Sighash type (default SIGHASH_ALL = 1)
+
+    Returns:
+        DER-encoded signature with sighash type byte appended
+    """
     sighash = compute_sighash_segwit(tx, input_index, script_code, value, sighash_type)
 
     # Sign the pre-hashed sighash (it's already SHA256d)
-    # Use Prehashed to prevent the library from hashing again
-    signature = private_key.sign(sighash, ec.ECDSA(utils.Prehashed(hashes.SHA256())))
-    r, s = utils.decode_dss_signature(signature)
+    # coincurve's sign() with hasher=None skips hashing
+    signature = private_key.sign(sighash, hasher=None)
 
-    # Normalize s to low-S form (BIP 62/BIP 146)
-    # secp256k1 curve order
-    secp256k1_order = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-    secp256k1_half_order = secp256k1_order // 2
-
-    if s > secp256k1_half_order:
-        s = secp256k1_order - s
-
-    der_signature = utils.encode_dss_signature(r, s)
-    return der_signature + bytes([sighash_type])
+    return signature + bytes([sighash_type])
 
 
 def create_p2wpkh_script_code(pubkey_bytes: bytes) -> bytes:

@@ -197,8 +197,6 @@ services:
     depends_on:
       bitcoin:
         condition: service_healthy
-    profiles:
-      - neutrino  # Only start with: docker-compose --profile neutrino up
 
   # Maker with neutrino backend
   maker-neutrino:

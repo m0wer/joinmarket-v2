@@ -26,8 +26,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from coincurve import PublicKey
 from loguru import logger
 
 # secp256k1 curve order
@@ -88,96 +87,45 @@ class PoDLECommitment:
 
 
 # ==============================================================================
-# EC Point Operations
+# EC Point Operations using coincurve
 # ==============================================================================
 
 
-def get_nums_point(index: int) -> ec.EllipticCurvePublicKey:
+def get_nums_point(index: int) -> PublicKey:
     """Get Nothing-Up-My-Sleeve (NUMS) generator point J for given index."""
     if index not in PRECOMPUTED_NUMS:
         raise PoDLEError(f"NUMS point index {index} not supported (max 9)")
 
     point_bytes = PRECOMPUTED_NUMS[index]
-    return ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), point_bytes)
+    return PublicKey(point_bytes)
 
 
-def scalar_mult_g(scalar: int) -> ec.EllipticCurvePublicKey:
-    """Multiply generator G by scalar."""
-    private_key = ec.derive_private_key(scalar % SECP256K1_N, ec.SECP256K1())
-    return private_key.public_key()
-
-
-def point_mult(scalar: int, point: ec.EllipticCurvePublicKey) -> ec.EllipticCurvePublicKey:
-    """Multiply EC point by scalar using double-and-add algorithm."""
-    nums = point.public_numbers()
-    x, y = nums.x, nums.y
-
-    result_x: int | None = None
-    result_y: int | None = None
-
+def scalar_mult_g(scalar: int) -> PublicKey:
+    """Multiply generator G by scalar (creates public key from private key)."""
     scalar = scalar % SECP256K1_N
-    curr_x, curr_y = x, y
-
-    while scalar > 0:
-        if scalar & 1:
-            if result_x is None or result_y is None:
-                result_x, result_y = curr_x, curr_y
-            else:
-                result_x, result_y = _point_add(result_x, result_y, curr_x, curr_y)
-
-        curr_x, curr_y = _point_double(curr_x, curr_y)
-        scalar >>= 1
-
-    if result_x is None or result_y is None:
-        raise PoDLEError("Scalar multiplication resulted in point at infinity")
-
-    return ec.EllipticCurvePublicNumbers(result_x, result_y, ec.SECP256K1()).public_key()
+    if scalar == 0:
+        raise PoDLEError("Scalar cannot be zero")
+    scalar_bytes = scalar.to_bytes(32, "big")
+    return PublicKey.from_secret(scalar_bytes)
 
 
-def point_add(
-    p1: ec.EllipticCurvePublicKey, p2: ec.EllipticCurvePublicKey
-) -> ec.EllipticCurvePublicKey:
-    """Add two EC points."""
-    p1_nums = p1.public_numbers()
-    p2_nums = p2.public_numbers()
-
-    x1, y1 = p1_nums.x, p1_nums.y
-    x2, y2 = p2_nums.x, p2_nums.y
-
-    x3, y3 = _point_add(x1, y1, x2, y2)
-    return ec.EllipticCurvePublicNumbers(x3, y3, ec.SECP256K1()).public_key()
+def point_mult(scalar: int, point: PublicKey) -> PublicKey:
+    """Multiply EC point by scalar using coincurve."""
+    scalar = scalar % SECP256K1_N
+    if scalar == 0:
+        raise PoDLEError("Scalar cannot be zero")
+    scalar_bytes = scalar.to_bytes(32, "big")
+    return point.multiply(scalar_bytes)
 
 
-def _point_add(x1: int, y1: int, x2: int, y2: int) -> tuple[int, int]:
-    """Add two points on secp256k1."""
-    if x1 == x2 and y1 == y2:
-        return _point_double(x1, y1)
-
-    if x1 == x2:
-        raise ValueError("Points are inverses")
-
-    p = SECP256K1_P
-    s = ((y2 - y1) * pow(x2 - x1, p - 2, p)) % p
-    x3 = (s * s - x1 - x2) % p
-    y3 = (s * (x1 - x3) - y1) % p
-    return x3, y3
+def point_add(p1: PublicKey, p2: PublicKey) -> PublicKey:
+    """Add two EC points using coincurve."""
+    return p1.combine([p2])
 
 
-def _point_double(x: int, y: int) -> tuple[int, int]:
-    """Double a point on secp256k1."""
-    p = SECP256K1_P
-    s = ((3 * x * x) * pow(2 * y, p - 2, p)) % p
-    x3 = (s * s - 2 * x) % p
-    y3 = (s * (x - x3) - y) % p
-    return x3, y3
-
-
-def point_to_bytes(point: ec.EllipticCurvePublicKey) -> bytes:
+def point_to_bytes(point: PublicKey) -> bytes:
     """Convert EC point to compressed bytes."""
-    return point.public_bytes(
-        encoding=serialization.Encoding.X962,
-        format=serialization.PublicFormat.CompressedPoint,
-    )
+    return point.format(compressed=True)
 
 
 # ==============================================================================
@@ -314,8 +262,8 @@ def verify_podle(
         if commitment != expected_commitment:
             return False, "Commitment does not match H(P2)"
 
-        p_point = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), p)
-        p2_point = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256K1(), p2)
+        p_point = PublicKey(p)
+        p2_point = PublicKey(p2)
 
         s_int = int.from_bytes(sig, "big")
         e_int = int.from_bytes(e, "big")
@@ -324,7 +272,7 @@ def verify_podle(
             return False, "Signature values out of range"
 
         # sg = s * G
-        sg = scalar_mult_g(s_int)
+        sg = scalar_mult_g(s_int) if s_int > 0 else None
 
         for index in index_range:
             try:
@@ -332,12 +280,15 @@ def verify_podle(
 
                 # Kg = s*G + e*P
                 ep = point_mult(e_int, p_point)
-                kg = point_add(sg, ep)
+                kg = point_add(sg, ep) if sg is not None else ep
 
                 # Kj = s*J + e*P2
-                sj = point_mult(s_int, j)
                 ep2 = point_mult(e_int, p2_point)
-                kj = point_add(sj, ep2)
+                if s_int > 0:
+                    sj = point_mult(s_int, j)
+                    kj = point_add(sj, ep2)
+                else:
+                    kj = ep2
 
                 kg_bytes = point_to_bytes(kg)
                 kj_bytes = point_to_bytes(kj)

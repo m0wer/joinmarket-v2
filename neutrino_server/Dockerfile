@@ -44,5 +44,5 @@ EXPOSE 8334
 
 VOLUME ["/data/neutrino"]
 
-ENTRYPOINT ["neutrinod"]
-CMD ["--network=${NETWORK}", "--listen=${LISTEN_ADDR}", "--datadir=${DATA_DIR}", "--loglevel=${LOG_LEVEL}"]
+ENTRYPOINT ["/bin/sh", "-c"]
+CMD ["exec neutrinod --network=$NETWORK --listen=$LISTEN_ADDR --datadir=$DATA_DIR --loglevel=$LOG_LEVEL --connect=$CONNECT_PEERS"]

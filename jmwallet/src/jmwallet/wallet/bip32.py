@@ -8,8 +8,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from coincurve import PrivateKey, PublicKey
+
+# secp256k1 curve order
+SECP256K1_N = int("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
 
 
 class HDKey:
@@ -18,11 +20,21 @@ class HDKey:
     Implements BIP32 derivation.
     """
 
-    def __init__(self, private_key: ec.EllipticCurvePrivateKey, chain_code: bytes, depth: int = 0):
-        self.private_key = private_key
-        self.public_key = private_key.public_key()
+    def __init__(self, private_key: PrivateKey, chain_code: bytes, depth: int = 0):
+        self._private_key = private_key
+        self._public_key = private_key.public_key
         self.chain_code = chain_code
         self.depth = depth
+
+    @property
+    def private_key(self) -> PrivateKey:
+        """Return the coincurve PrivateKey instance."""
+        return self._private_key
+
+    @property
+    def public_key(self) -> PublicKey:
+        """Return the coincurve PublicKey instance."""
+        return self._public_key
 
     @classmethod
     def from_seed(cls, seed: bytes) -> HDKey:
@@ -31,8 +43,7 @@ class HDKey:
         key_bytes = hmac_result[:32]
         chain_code = hmac_result[32:]
 
-        key_int = int.from_bytes(key_bytes, "big")
-        private_key = ec.derive_private_key(key_int, ec.SECP256K1())
+        private_key = PrivateKey(key_bytes)
 
         return cls(private_key, chain_code, depth=0)
 
@@ -67,48 +78,36 @@ class HDKey:
         hardened = index >= 0x80000000
 
         if hardened:
-            priv_bytes = self.private_key.private_numbers().private_value.to_bytes(32, "big")
+            priv_bytes = self._private_key.secret
             data = b"\x00" + priv_bytes + index.to_bytes(4, "big")
         else:
-            pub_bytes = self.public_key.public_bytes(
-                encoding=serialization.Encoding.X962,
-                format=serialization.PublicFormat.CompressedPoint,
-            )
+            pub_bytes = self._public_key.format(compressed=True)
             data = pub_bytes + index.to_bytes(4, "big")
 
         hmac_result = hmac.new(self.chain_code, data, hashlib.sha512).digest()
         key_offset = hmac_result[:32]
         child_chain = hmac_result[32:]
 
-        parent_key_int = self.private_key.private_numbers().private_value
+        parent_key_int = int.from_bytes(self._private_key.secret, "big")
         offset_int = int.from_bytes(key_offset, "big")
 
-        n = int("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
-        child_key_int = (parent_key_int + offset_int) % n
+        child_key_int = (parent_key_int + offset_int) % SECP256K1_N
 
         if child_key_int == 0:
             raise ValueError("Invalid child key")
 
-        child_private_key = ec.derive_private_key(child_key_int, ec.SECP256K1())
+        child_key_bytes = child_key_int.to_bytes(32, "big")
+        child_private_key = PrivateKey(child_key_bytes)
 
         return HDKey(child_private_key, child_chain, depth=self.depth + 1)
 
     def get_private_key_bytes(self) -> bytes:
         """Get private key as 32 bytes"""
-        return self.private_key.private_numbers().private_value.to_bytes(32, "big")
+        return self._private_key.secret
 
     def get_public_key_bytes(self, compressed: bool = True) -> bytes:
         """Get public key bytes"""
-        if compressed:
-            return self.public_key.public_bytes(
-                encoding=serialization.Encoding.X962,
-                format=serialization.PublicFormat.CompressedPoint,
-            )
-        else:
-            return self.public_key.public_bytes(
-                encoding=serialization.Encoding.X962,
-                format=serialization.PublicFormat.UncompressedPoint,
-            )
+        return self._public_key.format(compressed=compressed)
 
     def get_address(self, network: str = "mainnet") -> str:
         """Get P2WPKH (Native SegWit) address for this key"""
@@ -118,9 +117,8 @@ class HDKey:
         return pubkey_to_p2wpkh_address(pubkey_hex, network)
 
     def sign(self, message: bytes) -> bytes:
-        """Sign a message with this key"""
-        signature = self.private_key.sign(message, ec.ECDSA(hashes.SHA256()))
-        return signature
+        """Sign a message with this key (uses SHA256 hashing)."""
+        return self._private_key.sign(message)
 
 
 def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:

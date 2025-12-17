@@ -869,7 +869,7 @@ async def test_complete_coinjoin_two_makers(
 
     This mirrors the manual testing documented in docs/REGTEST_TESTING.md
     """
-    from tests.e2e.rpc_utils import mine_blocks
+    from tests.e2e.rpc_utils import ensure_wallet_funded, mine_blocks
 
     # Create wallets for all participants
     maker1_wallet = WalletService(
@@ -896,34 +896,68 @@ async def test_complete_coinjoin_two_makers(
     await maker2_wallet.sync_all()
     await taker_wallet.sync_all()
 
-    # Check balances
+    # Check balances and auto-fund if needed
+    min_balance = 100_000_000  # 1 BTC minimum
+
     maker1_balance = await maker1_wallet.get_total_balance()
+    if maker1_balance < min_balance:
+        print(
+            f"Maker1 balance ({maker1_balance:,} sats) below minimum, auto-funding..."
+        )
+        funding_address = maker1_wallet.get_receive_address(0, 0)
+        funded = await ensure_wallet_funded(
+            funding_address, amount_btc=2.0, confirmations=2
+        )
+        if funded:
+            await maker1_wallet.sync_all()
+            maker1_balance = await maker1_wallet.get_total_balance()
+
     maker2_balance = await maker2_wallet.get_total_balance()
+    if maker2_balance < min_balance:
+        print(
+            f"Maker2 balance ({maker2_balance:,} sats) below minimum, auto-funding..."
+        )
+        funding_address = maker2_wallet.get_receive_address(0, 0)
+        funded = await ensure_wallet_funded(
+            funding_address, amount_btc=2.0, confirmations=2
+        )
+        if funded:
+            await maker2_wallet.sync_all()
+            maker2_balance = await maker2_wallet.get_total_balance()
+
     taker_balance = await taker_wallet.get_total_balance()
+    if taker_balance < min_balance:
+        print(f"Taker balance ({taker_balance:,} sats) below minimum, auto-funding...")
+        funding_address = taker_wallet.get_receive_address(0, 0)
+        funded = await ensure_wallet_funded(
+            funding_address, amount_btc=2.0, confirmations=2
+        )
+        if funded:
+            await taker_wallet.sync_all()
+            taker_balance = await taker_wallet.get_total_balance()
 
     print(f"Maker1 balance: {maker1_balance:,} sats")
     print(f"Maker2 balance: {maker2_balance:,} sats")
     print(f"Taker balance: {taker_balance:,} sats")
 
-    # Skip if insufficient funds
-    min_balance = 100_000_000  # 1 BTC minimum
+    # Skip if still insufficient funds after auto-funding attempt
     if maker1_balance < min_balance:
         await maker1_wallet.close()
         await maker2_wallet.close()
         await taker_wallet.close()
-        pytest.skip(f"Maker1 needs at least {min_balance} sats")
+        pytest.skip(f"Maker1 needs at least {min_balance} sats (auto-funding failed)")
 
     if maker2_balance < min_balance:
         await maker1_wallet.close()
         await maker2_wallet.close()
         await taker_wallet.close()
-        pytest.skip(f"Maker2 needs at least {min_balance} sats")
+        pytest.skip(f"Maker2 needs at least {min_balance} sats (auto-funding failed)")
 
     if taker_balance < min_balance:
         await maker1_wallet.close()
         await maker2_wallet.close()
         await taker_wallet.close()
-        pytest.skip(f"Taker needs at least {min_balance} sats")
+        pytest.skip(f"Taker needs at least {min_balance} sats (auto-funding failed)")
 
     # Create maker bots
     maker1_bot = MakerBot(maker1_wallet, bitcoin_backend, maker_config)
@@ -1170,10 +1204,16 @@ async def test_signing_produces_valid_witness(funded_taker_wallet: WalletService
     assert signature[0] == 0x30, "DER signatures start with 0x30"
 
     # Verify low-S (BIP 62/146)
-    from cryptography.hazmat.primitives.asymmetric import utils
-
+    # coincurve always produces low-S signatures by default
+    # DER format: 0x30 [total-length] 0x02 [r-length] [r] 0x02 [s-length] [s]
     der_sig = signature[:-1]  # Remove sighash byte
-    r, s = utils.decode_dss_signature(der_sig)
+    assert der_sig[0] == 0x30  # DER sequence marker
+    assert der_sig[2] == 0x02  # r integer marker
+    r_len = der_sig[3]
+    s_marker_pos = 4 + r_len
+    assert der_sig[s_marker_pos] == 0x02  # s integer marker
+    s_len = der_sig[s_marker_pos + 1]
+    s = int.from_bytes(der_sig[s_marker_pos + 2 : s_marker_pos + 2 + s_len], "big")
 
     secp256k1_half_order = (
         0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141 // 2

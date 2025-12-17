@@ -9,6 +9,7 @@ package neutrino
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btclog"
+	"github.com/btcsuite/btcwallet/walletdb"
+	_ "github.com/btcsuite/btcwallet/walletdb/bdb" // Import bbolt driver
 	"github.com/lightninglabs/neutrino"
 )
 
@@ -39,6 +42,7 @@ type Node struct {
 	chainService *neutrino.ChainService
 	rescanMgr    *RescanManager
 	logger       btclog.Logger
+	db           walletdb.DB
 
 	mu           sync.RWMutex
 	synced       bool
@@ -99,9 +103,18 @@ func NewNode(config *Config) (*Node, error) {
 func (n *Node) Start() error {
 	n.logger.Info("Starting neutrino node...")
 
+	// Open the database for neutrino
+	dbPath := filepath.Join(n.config.DataDir, "neutrino.db")
+	db, err := walletdb.Create("bdb", dbPath, true, 60*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to create database at %s: %w", dbPath, err)
+	}
+	n.db = db
+
 	// Create neutrino config
 	neutrinoConfig := neutrino.Config{
 		DataDir:         n.config.DataDir,
+		Database:        db,
 		ChainParams:     *n.chainParams,
 		FilterCacheSize: uint64(n.config.FilterCacheSize),
 	}
@@ -125,6 +138,7 @@ func (n *Node) Start() error {
 	// Create chain service
 	chainService, err := neutrino.NewChainService(neutrinoConfig)
 	if err != nil {
+		n.db.Close()
 		return fmt.Errorf("failed to create chain service: %w", err)
 	}
 
@@ -132,6 +146,7 @@ func (n *Node) Start() error {
 
 	// Start the chain service
 	if err := n.chainService.Start(); err != nil {
+		n.db.Close()
 		return fmt.Errorf("failed to start chain service: %w", err)
 	}
 
@@ -152,6 +167,12 @@ func (n *Node) Stop() error {
 	if n.chainService != nil {
 		if err := n.chainService.Stop(); err != nil {
 			return fmt.Errorf("failed to stop chain service: %w", err)
+		}
+	}
+
+	if n.db != nil {
+		if err := n.db.Close(); err != nil {
+			return fmt.Errorf("failed to close database: %w", err)
 		}
 	}
 

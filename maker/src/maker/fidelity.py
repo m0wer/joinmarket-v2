@@ -7,8 +7,7 @@ import hashlib
 import struct
 from dataclasses import dataclass
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import ec, utils
+from coincurve import PrivateKey
 from jmcore.bond_calc import calculate_timelocked_fidelity_bond_value
 from jmwallet.wallet.service import WalletService
 from loguru import logger
@@ -26,7 +25,7 @@ class FidelityBondInfo:
     confirmation_time: int
     bond_value: int
     pubkey: bytes | None = None
-    private_key: ec.EllipticCurvePrivateKey | None = None
+    private_key: PrivateKey | None = None
 
 
 def find_fidelity_bonds(
@@ -103,15 +102,14 @@ def _pad_signature(sig_der: bytes, target_len: int = 72) -> bytes:
     return sig_der + b"\x00" * (target_len - len(sig_der))
 
 
-def _sign_message(private_key: ec.EllipticCurvePrivateKey, message: bytes) -> bytes:
-    """Sign a message with ECDSA and return DER-encoded signature."""
-    signature = private_key.sign(message, ec.ECDSA(hashes.SHA256()))
-    r, s = utils.decode_dss_signature(signature)
-    # Ensure low-S (BIP 62)
-    n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-    if s > n // 2:
-        s = n - s
-    return utils.encode_dss_signature(r, s)
+def _sign_message(private_key: PrivateKey, message: bytes) -> bytes:
+    """Sign a message with ECDSA and return DER-encoded signature.
+
+    coincurve.sign() returns a DER-encoded signature with low-S by default.
+    It uses SHA256 hashing internally.
+    """
+    # coincurve sign() uses sha256 by default and returns low-S DER signature
+    return private_key.sign(message)
 
 
 def create_fidelity_bond_proof(

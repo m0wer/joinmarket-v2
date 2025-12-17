@@ -8,7 +8,6 @@ import struct
 from unittest.mock import MagicMock, patch
 
 import pytest
-from cryptography.hazmat.primitives.asymmetric import utils
 
 from maker.fidelity import (
     CERT_EXPIRY_BLOCKS,
@@ -99,12 +98,23 @@ class TestSignMessage:
         assert sig1 != sig2
 
     def test_sign_low_s_value(self, test_private_key):
-        """Verify BIP 62 low-S requirement."""
+        """Verify BIP 62 low-S requirement.
+
+        coincurve always produces low-S signatures by default.
+        """
         message = hashlib.sha256(b"test low-s").digest()
         sig = _sign_message(test_private_key, message)
 
-        # Decode and verify S is low
-        r, s = utils.decode_dss_signature(sig)
+        # DER decode the signature to verify low-S
+        # DER format: 0x30 [total-length] 0x02 [r-length] [r] 0x02 [s-length] [s]
+        assert sig[0] == 0x30
+        assert sig[2] == 0x02  # r marker
+        r_len = sig[3]
+        s_marker_pos = 4 + r_len
+        assert sig[s_marker_pos] == 0x02  # s marker
+        s_len = sig[s_marker_pos + 1]
+        s = int.from_bytes(sig[s_marker_pos + 2 : s_marker_pos + 2 + s_len], "big")
+
         n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
         assert s <= n // 2
 
