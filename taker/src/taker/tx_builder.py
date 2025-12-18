@@ -10,9 +10,12 @@ Builds the unsigned CoinJoin transaction from:
 from __future__ import annotations
 
 import hashlib
+import logging
 import struct
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -511,7 +514,7 @@ def build_coinjoin_tx(
     taker_change_address: str,
     taker_total_input: int,
     # Maker data
-    maker_data: dict[str, dict[str, Any]],  # nick -> {utxos, cj_addr, change_addr, cjfee}
+    maker_data: dict[str, dict[str, Any]],  # nick -> {utxos, cj_addr, change_addr, cjfee, txfee}
     # Amounts
     cj_amount: int,
     tx_fee: int,
@@ -525,7 +528,7 @@ def build_coinjoin_tx(
         taker_cj_address: Taker's CJ output address
         taker_change_address: Taker's change address
         taker_total_input: Total value of taker's inputs
-        maker_data: Dict of maker nick -> {utxos, cj_addr, change_addr, cjfee}
+        maker_data: Dict of maker nick -> {utxos, cj_addr, change_addr, cjfee, txfee}
         cj_amount: Equal CoinJoin output amount
         tx_fee: Total transaction fee
         network: Network name
@@ -581,11 +584,26 @@ def build_coinjoin_tx(
         maker_cj_outputs[nick] = TxOutput(address=data["cj_addr"], value=cj_amount)
 
         # Maker change output
+        # Formula: change = inputs - cj_amount - txfee + cjfee
+        # (Maker pays txfee, receives cjfee from taker)
         maker_total_input = sum(u["value"] for u in data["utxos"])
-        maker_change = maker_total_input - cj_amount + data["cjfee"]
+        maker_txfee = data.get("txfee", 0)
+        maker_change = maker_total_input - cj_amount - maker_txfee + data["cjfee"]
+
+        logger.debug(
+            f"Maker {nick} change calculation: "
+            f"inputs={maker_total_input}, cj_amount={cj_amount}, "
+            f"cjfee={data['cjfee']}, txfee={maker_txfee}, change={maker_change}, "
+            f"dust_threshold=546"
+        )
 
         if maker_change > 546:
             maker_change_outputs[nick] = TxOutput(address=data["change_addr"], value=maker_change)
+        else:
+            logger.warning(
+                f"Maker {nick} change {maker_change} sats is below dust threshold (546), "
+                "no change output will be created"
+            )
 
     tx_data = CoinJoinTxData(
         taker_inputs=taker_inputs,

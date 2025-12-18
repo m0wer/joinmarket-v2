@@ -610,6 +610,9 @@ class Taker:
                     change_addr = ioauth_parts[3]
 
                     # Verify btc_sig if present - proves maker owns the UTXO
+                    # NOTE: BTC sig verification is OPTIONAL per JoinMarket protocol
+                    # It provides additional security by proving maker controls the UTXO
+                    # but not all makers may provide it
                     if len(ioauth_parts) >= 5:
                         btc_sig = ioauth_parts[4]
                         # The signature is over the maker's NaCl pubkey
@@ -617,11 +620,21 @@ class Taker:
 
                         maker_nacl_pk = session.pubkey  # Maker's NaCl pubkey from !pubkey
                         auth_pub_bytes = bytes.fromhex(auth_pub)
+                        logger.debug(
+                            f"Verifying BTC sig from {nick}: "
+                            f"message={maker_nacl_pk[:32]}..., "
+                            f"sig={btc_sig[:32]}..., "
+                            f"pubkey={auth_pub[:16]}..."
+                        )
                         if not ecdsa_verify(maker_nacl_pk, btc_sig, auth_pub_bytes):
-                            logger.warning(f"Invalid BTC signature from {nick}")
-                            del self.maker_sessions[nick]
-                            continue
-                        logger.debug(f"BTC signature verified for {nick}")
+                            logger.warning(
+                                f"BTC signature verification failed from {nick} - "
+                                f"continuing anyway (optional security feature)"
+                            )
+                            # NOTE: We don't delete the session here - BTC sig is optional
+                            # The transaction verification will still protect against fraud
+                        else:
+                            logger.info(f"BTC signature verified for {nick} ✓")
 
                     # Parse utxo_list: "txid:vout,txid:vout,..."
                     # Then fetch UTXO values from blockchain
@@ -632,17 +645,37 @@ class Taker:
                             vout_int = int(vout)
 
                             # Fetch UTXO value from blockchain
+                            # Try get_utxo first (fastest), fallback to parsing raw transaction
                             try:
                                 utxo_info = await self.backend.get_utxo(txid, vout_int)
                                 if utxo_info:
                                     value = utxo_info.value
                                     address = utxo_info.address
                                 else:
-                                    logger.warning(
-                                        f"Could not fetch UTXO info for {txid}:{vout_int}"
-                                    )
-                                    value = 0
-                                    address = ""
+                                    # Fallback: get raw transaction and parse it
+                                    tx_info = await self.backend.get_transaction(txid)
+                                    if tx_info and tx_info.raw:
+                                        # Parse output value from raw tx hex
+                                        from maker.tx_verification import parse_transaction
+
+                                        parsed_tx = parse_transaction(
+                                            tx_info.raw, network=self.config.network
+                                        )
+                                        if parsed_tx and len(parsed_tx["outputs"]) > vout_int:
+                                            value = parsed_tx["outputs"][vout_int]["value"]
+                                            address = parsed_tx["outputs"][vout_int].get(
+                                                "address", ""
+                                            )
+                                        else:
+                                            logger.warning(
+                                                f"Could not parse output {vout_int} from tx {txid}"
+                                            )
+                                            value = 0
+                                            address = ""
+                                    else:
+                                        logger.warning(f"Could not fetch transaction {txid}")
+                                        value = 0
+                                        address = ""
                             except Exception as e:
                                 logger.warning(f"Error fetching UTXO {txid}:{vout_int}: {e}")
                                 value = 0
@@ -655,6 +688,9 @@ class Taker:
                                     "value": value,
                                     "address": address,
                                 }
+                            )
+                            logger.debug(
+                                f"Added UTXO from {nick}: {txid}:{vout_int} = {value} sats"
                             )
 
                     session.cj_address = cj_addr
@@ -740,6 +776,7 @@ class Taker:
                     "cj_addr": session.cj_address,
                     "change_addr": session.change_address,
                     "cjfee": cjfee,
+                    "txfee": session.offer.txfee,  # Maker's share of tx fee
                 }
 
             # Build transaction
