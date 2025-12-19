@@ -187,9 +187,9 @@ class OrderbookAggregator:
             onion_address,
             port,
             self.network,
-            self.socks_host,
-            self.socks_port,
-            self.timeout,
+            socks_host=self.socks_host,
+            socks_port=self.socks_port,
+            timeout=self.timeout,
             max_message_size=self.max_message_size,
         )
         try:
@@ -280,9 +280,9 @@ class OrderbookAggregator:
             onion_address,
             port,
             self.network,
-            self.socks_host,
-            self.socks_port,
-            self.timeout,
+            socks_host=self.socks_host,
+            socks_port=self.socks_port,
+            timeout=self.timeout,
             max_message_size=self.max_message_size,
             on_disconnect=on_disconnect,
         )

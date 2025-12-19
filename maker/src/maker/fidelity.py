@@ -133,14 +133,18 @@ def _pad_signature(sig_der: bytes, target_len: int = 72) -> bytes:
     return sig_der + b"\x00" * (target_len - len(sig_der))
 
 
-def _sign_message(private_key: PrivateKey, message: bytes) -> bytes:
-    """Sign a message with ECDSA and return DER-encoded signature.
+def _sign_message(private_key: PrivateKey, message_hash: bytes) -> bytes:
+    """Sign a pre-hashed message with ECDSA and return DER-encoded signature.
 
-    coincurve.sign() returns a DER-encoded signature with low-S by default.
-    It uses SHA256 hashing internally.
+    Args:
+        private_key: coincurve PrivateKey
+        message_hash: Already SHA256-hashed message (32 bytes)
+
+    Returns:
+        DER-encoded signature
     """
-    # coincurve sign() uses sha256 by default and returns low-S DER signature
-    return private_key.sign(message)
+    # Use hasher=None since message is already hashed
+    return private_key.sign(message_hash, hasher=None)
 
 
 def create_fidelity_bond_proof(

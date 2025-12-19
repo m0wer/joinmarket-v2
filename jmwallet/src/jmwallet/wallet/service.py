@@ -4,11 +4,16 @@ JoinMarket wallet service with mixdepth support.
 
 from __future__ import annotations
 
+from jmcore.btc_script import mk_freeze_script
 from loguru import logger
 
 from jmwallet.backends.base import BlockchainBackend
+from jmwallet.wallet.address import script_to_p2wsh_address
 from jmwallet.wallet.bip32 import HDKey, mnemonic_to_seed
 from jmwallet.wallet.models import UTXOInfo
+
+# Fidelity bond constants
+FIDELITY_BOND_BRANCH = 2  # Internal branch for fidelity bonds
 
 
 class WalletService:
@@ -67,6 +72,73 @@ class WalletService:
     def get_change_address(self, mixdepth: int, index: int) -> str:
         """Get internal (change) address"""
         return self.get_address(mixdepth, 1, index)
+
+    def get_fidelity_bond_key(self, index: int, locktime: int) -> HDKey:
+        """
+        Get the HD key for a fidelity bond.
+
+        Fidelity bond path: m/84'/coin'/0'/2/index
+        The locktime is NOT in the derivation path, but stored separately.
+
+        Args:
+            index: Address index within the fidelity bond branch
+            locktime: Unix timestamp for the timelock (stored in path notation as :locktime)
+
+        Returns:
+            HDKey for the fidelity bond
+        """
+        # Fidelity bonds always use mixdepth 0, branch 2
+        path = f"{self.root_path}/0'/{FIDELITY_BOND_BRANCH}/{index}"
+        return self.master_key.derive(path)
+
+    def get_fidelity_bond_address(self, index: int, locktime: int) -> str:
+        """
+        Get a fidelity bond P2WSH address.
+
+        Creates a timelocked script: <locktime> OP_CLTV OP_DROP <pubkey> OP_CHECKSIG
+        wrapped in P2WSH.
+
+        Args:
+            index: Address index within the fidelity bond branch
+            locktime: Unix timestamp for the timelock
+
+        Returns:
+            P2WSH address for the fidelity bond
+        """
+        key = self.get_fidelity_bond_key(index, locktime)
+        pubkey_hex = key.get_public_key_bytes(compressed=True).hex()
+
+        # Create the timelock script
+        script = mk_freeze_script(pubkey_hex, locktime)
+
+        # Convert to P2WSH address
+        address = script_to_p2wsh_address(script, self.network)
+
+        # Cache with special path notation including locktime
+        # Path format: m/84'/coin'/0'/2/index:locktime
+        self.address_cache[address] = (0, FIDELITY_BOND_BRANCH, index)
+        # Also store the locktime in a separate cache for fidelity bonds
+        if not hasattr(self, "fidelity_bond_locktime_cache"):
+            self.fidelity_bond_locktime_cache: dict[str, int] = {}
+        self.fidelity_bond_locktime_cache[address] = locktime
+
+        logger.debug(f"Created fidelity bond address {address} with locktime {locktime}")
+        return address
+
+    def get_fidelity_bond_script(self, index: int, locktime: int) -> bytes:
+        """
+        Get the redeem script for a fidelity bond.
+
+        Args:
+            index: Address index within the fidelity bond branch
+            locktime: Unix timestamp for the timelock
+
+        Returns:
+            Timelock redeem script bytes
+        """
+        key = self.get_fidelity_bond_key(index, locktime)
+        pubkey_hex = key.get_public_key_bytes(compressed=True).hex()
+        return mk_freeze_script(pubkey_hex, locktime)
 
     def get_private_key(self, mixdepth: int, change: int, index: int) -> bytes:
         """Get private key for given path"""
@@ -146,6 +218,88 @@ class WalletService:
             )
 
         self.utxo_cache[mixdepth] = utxos
+        return utxos
+
+    async def sync_fidelity_bonds(self, locktimes: list[int]) -> list[UTXOInfo]:
+        """
+        Sync fidelity bond UTXOs with specific locktimes.
+
+        Fidelity bonds use mixdepth 0, branch 2, with path format:
+        m/84'/coin'/0'/2/index:locktime
+
+        Args:
+            locktimes: List of Unix timestamps to scan for
+
+        Returns:
+            List of fidelity bond UTXOs found
+        """
+        utxos: list[UTXOInfo] = []
+
+        if not locktimes:
+            logger.debug("No locktimes provided for fidelity bond sync")
+            return utxos
+
+        for locktime in locktimes:
+            consecutive_empty = 0
+            index = 0
+
+            while consecutive_empty < self.gap_limit:
+                # Generate addresses for this locktime
+                addresses = []
+                for i in range(self.gap_limit):
+                    address = self.get_fidelity_bond_address(index + i, locktime)
+                    addresses.append(address)
+
+                # Fetch UTXOs
+                backend_utxos = await self.backend.get_utxos(addresses)
+
+                # Group by address
+                utxos_by_address: dict[str, list] = {addr: [] for addr in addresses}
+                for utxo in backend_utxos:
+                    if utxo.address in utxos_by_address:
+                        utxos_by_address[utxo.address].append(utxo)
+
+                # Process results
+                for i, address in enumerate(addresses):
+                    addr_utxos = utxos_by_address[address]
+
+                    if addr_utxos:
+                        consecutive_empty = 0
+                        for utxo in addr_utxos:
+                            # Path includes locktime notation
+                            path = (
+                                f"{self.root_path}/0'/{FIDELITY_BOND_BRANCH}/{index + i}:{locktime}"
+                            )
+                            utxo_info = UTXOInfo(
+                                txid=utxo.txid,
+                                vout=utxo.vout,
+                                value=utxo.value,
+                                address=address,
+                                confirmations=utxo.confirmations,
+                                scriptpubkey=utxo.scriptpubkey,
+                                path=path,
+                                mixdepth=0,  # Fidelity bonds always in mixdepth 0
+                            )
+                            utxos.append(utxo_info)
+                            logger.info(
+                                f"Found fidelity bond UTXO: {utxo.txid}:{utxo.vout} "
+                                f"value={utxo.value} locktime={locktime}"
+                            )
+                    else:
+                        consecutive_empty += 1
+
+                    if consecutive_empty >= self.gap_limit:
+                        break
+
+                index += self.gap_limit
+
+        # Add fidelity bond UTXOs to mixdepth 0 cache
+        if utxos:
+            if 0 not in self.utxo_cache:
+                self.utxo_cache[0] = []
+            self.utxo_cache[0].extend(utxos)
+            logger.info(f"Found {len(utxos)} fidelity bond UTXOs")
+
         return utxos
 
     async def sync_all(self) -> dict[int, list[UTXOInfo]]:

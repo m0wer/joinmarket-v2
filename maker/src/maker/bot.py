@@ -81,6 +81,13 @@ class MakerBot:
             logger.info("Syncing wallet...")
             await self.wallet.sync_all()
 
+            # Sync fidelity bonds if locktimes are configured
+            if self.config.fidelity_bond_locktimes:
+                logger.info(
+                    f"Syncing fidelity bonds for locktimes: {self.config.fidelity_bond_locktimes}"
+                )
+                await self.wallet.sync_fidelity_bonds(self.config.fidelity_bond_locktimes)
+
             total_balance = await self.wallet.get_total_balance()
             logger.info(f"Wallet synced. Total balance: {total_balance:,} sats")
 

@@ -67,14 +67,24 @@ ENV NEUTRINO_URL=http://localhost:8334
 # Directory servers (comma-separated list of host:port)
 ENV DIRECTORY_SERVERS=
 
+# Fidelity bond locktimes (comma-separated list of Unix timestamps)
+# These are used to scan for timelocked fidelity bond UTXOs
+ENV FIDELITY_BOND_LOCKTIMES=
+
 # Wallet mnemonic (REQUIRED - set at runtime!)
 # ENV MNEMONIC=
 
-# Use shell to conditionally add --bitcoin-network if set
+# Use shell to conditionally add optional arguments
 CMD ["sh", "-c", "\
     BITCOIN_NETWORK_ARG=\"\"; \
     if [ -n \"${BITCOIN_NETWORK}\" ]; then \
         BITCOIN_NETWORK_ARG=\"--bitcoin-network ${BITCOIN_NETWORK}\"; \
+    fi; \
+    FIDELITY_BOND_ARGS=\"\"; \
+    if [ -n \"${FIDELITY_BOND_LOCKTIMES}\" ]; then \
+        for lt in $(echo \"${FIDELITY_BOND_LOCKTIMES}\" | tr ',' ' '); do \
+            FIDELITY_BOND_ARGS=\"${FIDELITY_BOND_ARGS} --fidelity-bond-locktimes ${lt}\"; \
+        done; \
     fi; \
     jm-maker start \
     --mnemonic \"${MNEMONIC}\" \
@@ -88,4 +98,5 @@ CMD ["sh", "-c", "\
     --min-size \"${MIN_SIZE}\" \
     --cj-fee-relative \"${CJ_FEE_RELATIVE}\" \
     --tx-fee-contribution \"${TX_FEE_CONTRIBUTION}\" \
-    --directory-servers \"${DIRECTORY_SERVERS}\""]
+    --directory-servers \"${DIRECTORY_SERVERS}\" \
+    ${FIDELITY_BOND_ARGS}"]

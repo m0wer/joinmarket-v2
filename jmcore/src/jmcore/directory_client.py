@@ -402,8 +402,10 @@ class DirectoryClient:
                                 bond_parts = rest_parts[1][6:].split()
                                 if bond_parts:
                                     bond_proof_b64 = bond_parts[0]
+                                    # For PUBLIC announcements, maker uses their own nick
+                                    # as taker_nick when creating the proof
                                     bond_data = parse_fidelity_bond_proof(
-                                        bond_proof_b64, from_nick, self.nick
+                                        bond_proof_b64, from_nick, from_nick
                                     )
                                     if bond_data:
                                         logger.debug(
@@ -535,18 +537,35 @@ class DirectoryClient:
         """Stop continuous listening."""
         self.running = False
 
-    async def listen_continuously(self) -> None:
+    async def listen_continuously(self, request_orderbook: bool = True) -> None:
         """
         Continuously listen for messages and update internal offer/bond caches.
 
         This method runs indefinitely until stop() is called or connection is lost.
         Used by orderbook_watcher and maker to maintain live orderbook state.
+
+        Args:
+            request_orderbook: If True, send !orderbook request on startup to get
+                current offers from makers. Set to False for maker bots that don't
+                need to receive other offers.
         """
         if not self.connection:
             raise DirectoryClientError("Not connected")
 
         logger.info(f"Starting continuous listening on {self.host}:{self.port}")
         self.running = True
+
+        # Request current orderbook from makers
+        if request_orderbook:
+            try:
+                pubmsg = {
+                    "type": MessageType.PUBMSG.value,
+                    "line": f"{self.nick}!PUBLIC!!orderbook",
+                }
+                await self.connection.send(json.dumps(pubmsg).encode("utf-8"))
+                logger.info("Sent !orderbook request to get current offers")
+            except Exception as e:
+                logger.warning(f"Failed to send !orderbook request: {e}")
 
         while self.running:
             try:
@@ -579,14 +598,54 @@ class DirectoryClient:
                                     "swabsoffer",
                                 ]:
                                     if rest.startswith(offer_type_prefix):
-                                        offer_parts = rest[len(offer_type_prefix) :].strip().split()
-                                        if len(offer_parts) >= 5:
+                                        # Separate offer from fidelity bond data
+                                        rest_parts = rest.split(COMMAND_PREFIX, 1)
+                                        offer_line = rest_parts[0].strip()
+
+                                        # Parse fidelity bond if present
+                                        bond_data = None
+                                        if len(rest_parts) > 1 and rest_parts[1].startswith(
+                                            "tbond "
+                                        ):
+                                            bond_parts = rest_parts[1][6:].split()
+                                            if bond_parts:
+                                                bond_proof_b64 = bond_parts[0]
+                                                # For PUBLIC announcements, maker uses their own nick
+                                                # as taker_nick when creating the proof
+                                                bond_data = parse_fidelity_bond_proof(
+                                                    bond_proof_b64, from_nick, from_nick
+                                                )
+                                                if bond_data:
+                                                    logger.debug(
+                                                        f"Parsed fidelity bond from {from_nick}: "
+                                                        f"txid={bond_data['utxo_txid'][:16]}..., "
+                                                        f"locktime={bond_data['locktime']}"
+                                                    )
+                                                    # Store bond in bonds cache
+                                                    utxo_str = (
+                                                        f"{bond_data['utxo_txid']}:"
+                                                        f"{bond_data['utxo_vout']}"
+                                                    )
+                                                    bond = FidelityBond(
+                                                        counterparty=from_nick,
+                                                        utxo_txid=bond_data["utxo_txid"],
+                                                        utxo_vout=bond_data["utxo_vout"],
+                                                        locktime=bond_data["locktime"],
+                                                        script=bond_data["utxo_pub"],
+                                                        utxo_confirmations=0,
+                                                        cert_expiry=bond_data["cert_expiry"],
+                                                        fidelity_bond_data=bond_data,
+                                                    )
+                                                    self.bonds[utxo_str] = bond
+
+                                        offer_parts = offer_line.split()
+                                        if len(offer_parts) >= 6:
                                             try:
-                                                oid = int(offer_parts[0])
-                                                minsize = int(offer_parts[1])
-                                                maxsize = int(offer_parts[2])
-                                                txfee = int(offer_parts[3])
-                                                cjfee_str = offer_parts[4]
+                                                oid = int(offer_parts[1])
+                                                minsize = int(offer_parts[2])
+                                                maxsize = int(offer_parts[3])
+                                                txfee = int(offer_parts[4])
+                                                cjfee_str = offer_parts[5]
 
                                                 if offer_type_prefix in [
                                                     "sw0absoffer",
@@ -605,6 +664,7 @@ class DirectoryClient:
                                                     txfee=txfee,
                                                     cjfee=cjfee,
                                                     fidelity_bond_value=0,
+                                                    fidelity_bond_data=bond_data,
                                                 )
 
                                                 # Update cache using tuple key
@@ -612,8 +672,9 @@ class DirectoryClient:
                                                 self.offers[offer_key] = offer
 
                                                 logger.debug(
-                                                    f"Updated offer cache: {from_nick} {offer_type_prefix} "
-                                                    f"oid={oid}"
+                                                    f"Updated offer cache: {from_nick} "
+                                                    f"{offer_type_prefix} oid={oid}"
+                                                    + (" (with bond)" if bond_data else "")
                                                 )
                                             except Exception as e:
                                                 logger.debug(f"Failed to parse offer update: {e}")

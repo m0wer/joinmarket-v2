@@ -45,6 +45,11 @@ class MakerConfig(BaseModel):
 
     min_confirmations: int = 1
 
+    # Fidelity bond configuration
+    # List of locktimes (Unix timestamps) to scan for fidelity bonds
+    # These should match locktimes used when creating bond UTXOs
+    fidelity_bond_locktimes: list[int] = Field(default_factory=list)
+
     model_config = {"frozen": False}
 
     @model_validator(mode="after")

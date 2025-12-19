@@ -96,3 +96,42 @@ def pubkey_to_p2wpkh_script(pubkey_hex: str) -> bytes:
     pubkey_hash = hash160(pubkey_bytes)
 
     return bytes([0x00, 0x14]) + pubkey_hash
+
+
+def script_to_p2wsh_address(script: bytes, network: str = "mainnet") -> str:
+    """
+    Convert a witness script to P2WSH (pay-to-witness-script-hash) address.
+    BIP173/BIP141 encoding.
+
+    Args:
+        script: The witness script bytes (e.g., timelock script for fidelity bonds)
+        network: Network type (mainnet, testnet, regtest)
+
+    Returns:
+        Bech32 encoded P2WSH address
+    """
+    # SHA256 of the script (P2WSH uses SHA256, not HASH160)
+    script_hash = hashlib.sha256(script).digest()
+
+    hrp = "bc" if network == "mainnet" else "tb" if network == "testnet" else "bcrt"
+
+    # P2WSH uses witness version 0 with 32-byte script hash
+    witness_version = 0
+    witness_program = convertbits(script_hash, 8, 5)
+
+    address = bech32_encode(hrp, [witness_version] + witness_program)
+    return address
+
+
+def script_to_p2wsh_scriptpubkey(script: bytes) -> bytes:
+    """
+    Create P2WSH scriptPubKey from witness script.
+
+    Args:
+        script: The witness script bytes
+
+    Returns:
+        P2WSH scriptPubKey (OP_0 <32-byte-hash>)
+    """
+    script_hash = hashlib.sha256(script).digest()
+    return bytes([0x00, 0x20]) + script_hash

@@ -80,6 +80,10 @@ def start(
         ["127.0.0.1:5222"],
         help="Directory servers host:port (multiple allowed)",
     ),
+    fidelity_bond_locktimes: list[int] = typer.Option(
+        [],
+        help="Fidelity bond locktimes (Unix timestamps) to scan for",
+    ),
 ):
     """Start the maker bot."""
     # Use bitcoin_network for address generation, default to network if not specified
@@ -108,6 +112,7 @@ def start(
         min_size=min_size,
         cj_fee_relative=cj_fee_relative,
         tx_fee_contribution=tx_fee_contribution,
+        fidelity_bond_locktimes=fidelity_bond_locktimes,
     )
 
     wallet = create_wallet_service(config)
