@@ -545,12 +545,12 @@ services:
 
   # ============================================================================
   # Neutrino Light Client (profile: neutrino)
+  # Uses ghcr.io/m0wer/neutrino-api - BIP157/158 compact block filter server
+  # See: https://github.com/m0wer/neutrino-api
   # ============================================================================
 
   neutrino:
-    build:
-      context: ./neutrino_server
-      dockerfile: Dockerfile
+    image: ghcr.io/m0wer/neutrino-api:0.2
     container_name: jm-neutrino
     restart: unless-stopped
     environment:

@@ -104,14 +104,19 @@ backend = NeutrinoBackend(config)
 
 **Running the Neutrino server:**
 
+The Neutrino server is maintained separately at [github.com/m0wer/neutrino-api](https://github.com/m0wer/neutrino-api).
+
 ```bash
-# With Docker
+# With Docker Compose (from jm-refactor root)
 docker-compose --profile neutrino up -d neutrino
 
-# Or build from source (Go required)
-cd neutrino_server
-go build -o neutrinod ./cmd/neutrinod
-./neutrinod --network=mainnet --datadir=./data
+# Or run standalone
+docker run -d \
+  -p 8334:8334 \
+  -v neutrino-data:/data/neutrino \
+  -e NETWORK=mainnet \
+  -e LOG_LEVEL=info \
+  ghcr.io/m0wer/neutrino-api:0.2
 ```
 
 ### Mempool Backend (Deprecated)

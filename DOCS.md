@@ -81,7 +81,7 @@ The implementation separates concerns into distinct packages:
 | `maker` | Maker bot: offer management, CoinJoin participation |
 | `taker` | Taker bot: CoinJoin orchestration, maker selection |
 | `orderbook_watcher` | Monitoring: orderbook visualization |
-| `neutrino_server` | Lightweight SPV server (BIP157/158) |
+| `neutrino_server` (external) | Lightweight SPV server (BIP157/158) - [github.com/m0wer/neutrino-api](https://github.com/m0wer/neutrino-api) |
 
 ---
 
@@ -277,6 +277,8 @@ jmwallet: Uses scantxoutset RPC directly (no wallet needed!)
 
 Neutrino is a BIP157/BIP158 light client that provides privacy-preserving blockchain access without requiring a full Bitcoin node.
 
+**The Neutrino server is maintained separately at [github.com/m0wer/neutrino-api](https://github.com/m0wer/neutrino-api).**
+
 ### Why Neutrino?
 
 | Feature | Full Node | Traditional SPV | Neutrino SPV |
@@ -288,9 +290,12 @@ Neutrino is a BIP157/BIP158 light client that provides privacy-preserving blockc
 
 ### Architecture
 
+The Neutrino server (written in Go) provides a REST API for wallet integration:
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Neutrino Server (Go)                        │
+│               github.com/m0wer/neutrino-api                      │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
@@ -329,11 +334,19 @@ Neutrino is a BIP157/BIP158 light client that provides privacy-preserving blockc
 ### Usage with Docker
 
 ```bash
-# Start Neutrino server (standalone)
+# Start Neutrino server using the pre-built image
 docker-compose --profile neutrino up -d neutrino
 
 # Or with full system
 docker-compose --profile neutrino up -d
+
+# Or run standalone (mainnet example)
+docker run -d \
+  -p 8334:8334 \
+  -v neutrino-data:/data/neutrino \
+  -e NETWORK=mainnet \
+  -e LOG_LEVEL=info \
+  ghcr.io/m0wer/neutrino-api:0.2
 ```
 
 ### Python Backend Integration
@@ -995,7 +1008,6 @@ Expected structure:
 | `taker/src/taker/taker.py` | Taker CoinJoin orchestration |
 | `taker/src/taker/tx_builder.py` | Transaction construction |
 | `jmwallet/src/jmwallet/wallet/signing.py` | P2WPKH signing utilities |
-| `neutrino_server/cmd/neutrinod/main.go` | Neutrino server entry point |
 | `jmwallet/src/jmwallet/backends/neutrino.py` | Neutrino backend client |
 
 ---

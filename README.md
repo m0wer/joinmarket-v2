@@ -11,7 +11,7 @@ This project is an alternative implementation of the reference JoinMarket protoc
 - **No BerkeleyDB Required**: Works with Bitcoin Core v30+ out of the box
 - **Neutrino SPV Support**: Run without a full node using BIP157/158 compact block filters
 - **Privacy-Preserving**: Tor integration, Neutrino filters never reveal your addresses
-- **Modern Stack**: Python 3.14+, Pydantic v2, AsyncIO, Go (for Neutrino server)
+- **Modern Stack**: Python 3.14+, Pydantic v2, AsyncIO
 
 ### Goals
 
@@ -68,9 +68,7 @@ jm-refactor/
 ├── maker/               # Maker bot (yield generator)
 │   ├── src/maker/       # Bot implementation
 │   └── tests/           # Integration and E2E tests
-├── neutrino_server/     # Lightweight SPV server (Go)
-│   ├── cmd/neutrinod/   # Server entry point
-│   └── internal/        # API and neutrino node wrapper
+├── (external)           # Neutrino server: https://github.com/m0wer/neutrino-api
 └── tests/               # Repository-level E2E tests
 ```
 
@@ -125,9 +123,10 @@ Yield generator / liquidity provider bot:
 - Transaction verification (prevents loss of funds)
 - Fidelity bond support
 
-### Neutrino Server
+### Neutrino Server (External)
 
-Lightweight SPV server using BIP157/158 compact block filters:
+Lightweight SPV server using BIP157/158 compact block filters.
+**Maintained separately at [github.com/m0wer/neutrino-api](https://github.com/m0wer/neutrino-api)**.
 
 - **No full node required**: ~500MB storage vs ~500GB for Bitcoin Core
 - **Privacy-preserving**: Downloads filters, not addresses (unlike Bloom filters)
