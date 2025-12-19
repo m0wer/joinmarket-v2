@@ -257,19 +257,41 @@ def fresh_docker_makers():
 
     This fixture restarts the Docker maker containers to prevent UTXO reuse
     between tests, which can cause transaction verification failures.
+
+    It also stops any non-e2e profile makers that might interfere with tests.
+
+    The wait time is generous to allow for:
+    - Container restart
+    - Wallet sync with blockchain
+    - Directory server reconnection
+    - Offer announcement and propagation
     """
     import subprocess
 
     try:
+        # Stop any non-e2e profile makers that might be running
+        # This prevents stale offers from interfering with tests
+        subprocess.run(
+            ["docker", "stop", "jm-maker"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        # Restart the e2e profile makers
         result = subprocess.run(
             ["docker", "restart", "jm-maker1", "jm-maker2"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
         )
         if result.returncode == 0:
             logger.info("Restarted Docker makers, waiting for startup...")
-            time.sleep(15)  # Wait for makers to start and sync with directory
+            # Wait for makers to fully initialize:
+            # - Container start: ~5s
+            # - Wallet sync: ~10-20s
+            # - Directory connection & offer announcement: ~5-10s
+            time.sleep(45)
         else:
             logger.warning(f"Failed to restart makers: {result.stderr}")
     except subprocess.TimeoutExpired:

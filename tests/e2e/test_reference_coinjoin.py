@@ -281,17 +281,114 @@ def get_jam_wallet_address(
     return None
 
 
-def fund_wallet_address(address: str, amount_btc: float = 1.0) -> bool:
-    """Fund a wallet address by mining blocks to it."""
-    logger.info(f"Funding {address} with {amount_btc} BTC...")
+def run_bitcoin_jam_cmd(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a bitcoin-cli command against the bitcoin-jam node."""
+    compose_file = get_compose_file()
+    cmd = [
+        "docker",
+        "compose",
+        "-f",
+        str(compose_file),
+        "exec",
+        "-T",
+        "bitcoin-jam",
+        "bitcoin-cli",
+        "-regtest",
+        "-rpcuser=test",
+        "-rpcpassword=test",
+        "-rpcport=18445",
+    ] + args
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
-    # Mine blocks to the address (110 for coinbase maturity + some extra)
+
+def fund_wallet_address(address: str, amount_btc: float = 1.0) -> bool:
+    """
+    Fund a wallet address with a single large UTXO.
+
+    JoinMarket's PoDLE commitment sourcing requires UTXOs that are at least 20%
+    of the coinjoin amount. Mining blocks directly to the address creates many
+    small coinbase UTXOs (~50 BTC each), which may not meet this requirement.
+
+    We use the main bitcoin node's fidelity_funder wallet which has mature coins,
+    send to the target address, and mine a block to confirm. The transaction will
+    propagate to bitcoin-jam since the nodes are peers.
+    """
+    logger.info(f"Funding {address} with {amount_btc} BTC as single large UTXO...")
+
+    # Use the fidelity_funder wallet on the main bitcoin node
+    # This wallet has mature coins available from the miner
+    funder_wallet = "fidelity_funder"
+
+    # Check if funder wallet has enough funds
+    result = run_bitcoin_cmd(["-rpcwallet=" + funder_wallet, "getbalance"])
+    if result.returncode != 0:
+        logger.warning(f"Could not get funder wallet balance: {result.stderr}")
+        return _fund_wallet_via_mining(address)
+
+    balance_str = result.stdout.strip()
+    try:
+        balance = float(balance_str)
+    except ValueError:
+        balance = 0.0
+
+    logger.info(f"Funder wallet balance: {balance} BTC")
+
+    # If funder wallet doesn't have enough funds, mine more blocks to it
+    if balance < amount_btc + 0.01:  # +0.01 for fees
+        logger.info("Funder wallet needs more funds, mining blocks...")
+        result = run_bitcoin_cmd(["-rpcwallet=" + funder_wallet, "getnewaddress"])
+        if result.returncode != 0:
+            logger.error(f"Could not get funder address: {result.stderr}")
+            return _fund_wallet_via_mining(address)
+
+        funder_address = result.stdout.strip()
+        # Mine 111 blocks for coinbase maturity
+        result = run_bitcoin_cmd(["generatetoaddress", "111", funder_address])
+        if result.returncode != 0:
+            logger.error(f"Failed to mine blocks: {result.stderr}")
+            return _fund_wallet_via_mining(address)
+
+        logger.info("Mined 111 blocks to funder wallet")
+
+    # Now send a single large transaction to the target address
+    logger.info(f"Sending {amount_btc} BTC to {address}...")
+    result = run_bitcoin_cmd(
+        ["-rpcwallet=" + funder_wallet, "sendtoaddress", address, str(amount_btc)]
+    )
+    if result.returncode != 0:
+        logger.error(f"Failed to send to address: {result.stderr}")
+        return _fund_wallet_via_mining(address)
+
+    txid = result.stdout.strip()
+    logger.info(f"Sent {amount_btc} BTC to {address}, txid: {txid}")
+
+    # Mine a block to confirm the transaction (on main node, propagates to peers)
+    result = run_bitcoin_cmd(["-rpcwallet=" + funder_wallet, "getnewaddress"])
+    if result.returncode == 0:
+        funder_address = result.stdout.strip()
+        result = run_bitcoin_cmd(["generatetoaddress", "1", funder_address])
+        if result.returncode == 0:
+            logger.info("Mined 1 block to confirm transaction")
+
+    # Wait a moment for the transaction to propagate to bitcoin-jam
+    time.sleep(3)
+
+    return True
+
+
+def _fund_wallet_via_mining(address: str) -> bool:
+    """Fallback: fund wallet by mining directly to it (creates small UTXOs)."""
+    logger.warning("Falling back to mining directly to target address...")
+    logger.warning("This creates many small UTXOs which may not work for PoDLE!")
+
+    # Mine blocks to the address on the main bitcoin node
+    # The blocks will propagate to bitcoin-jam since they're peers
     result = run_bitcoin_cmd(["generatetoaddress", "111", address])
     if result.returncode != 0:
         logger.error(f"Failed to mine blocks: {result.stderr}")
         return False
 
-    logger.info("Mined 111 blocks for coinbase maturity")
+    logger.info("Mined 111 blocks directly to address for coinbase maturity")
     return True
 
 

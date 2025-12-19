@@ -18,21 +18,31 @@ until $CLI getblockchaininfo > /dev/null 2>&1; do
 done
 echo "Bitcoin Core (JAM) is ready"
 
-# Create jm_wallet as a LEGACY wallet for reference JoinMarket compatibility
-# The reference implementation requires a non-descriptor (legacy) wallet
+# Create legacy wallets for reference JoinMarket compatibility
+# The reference implementation requires non-descriptor (legacy) wallets
 # For Bitcoin Core v28.x with -deprecatedrpc=create_bdb, use descriptors=false
+
+# Create jm_wallet (used by our joinmarket.cfg)
 echo "Creating legacy jm_wallet for JoinMarket..."
 $CLI -named createwallet wallet_name="jm_wallet" descriptors=false 2>/dev/null || true
 $CLI loadwallet "jm_wallet" 2>/dev/null || true
 
-# Verify wallet was created correctly
-wallet_info=$($CLI -rpcwallet=jm_wallet getwalletinfo 2>/dev/null)
-if echo "$wallet_info" | grep -q '"descriptors": false'; then
-    echo "Legacy jm_wallet created successfully (descriptors=false)"
-else
-    echo "WARNING: jm_wallet may not be a legacy wallet!"
-    echo "$wallet_info"
-fi
+# Create jm_webui_default (used by JAM standalone's default config)
+# JAM standalone modifies the config at runtime to use this wallet name
+echo "Creating legacy jm_webui_default for JAM standalone..."
+$CLI -named createwallet wallet_name="jm_webui_default" descriptors=false 2>/dev/null || true
+$CLI loadwallet "jm_webui_default" 2>/dev/null || true
+
+# Verify wallets were created correctly
+for wallet_name in jm_wallet jm_webui_default; do
+    wallet_info=$($CLI -rpcwallet=$wallet_name getwalletinfo 2>/dev/null)
+    if echo "$wallet_info" | grep -q '"descriptors": false'; then
+        echo "Legacy $wallet_name created successfully (descriptors=false)"
+    else
+        echo "WARNING: $wallet_name may not be a legacy wallet!"
+        echo "$wallet_info"
+    fi
+done
 
 # Wait for blocks to sync from main node
 echo "Waiting for blocks to sync from main node..."
