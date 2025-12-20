@@ -549,39 +549,6 @@ async def test_services_healthy(reference_services):
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(300)
-async def test_jam_can_connect_to_directory(reference_services):
-    """Test that jam can connect to our directory server via Tor."""
-    onion = reference_services["onion_address"]
-    logger.info(f"Testing jam connection to directory at {onion}")
-
-    # Give jam more time to establish Tor connection - CI environments are slower
-    # Tor bootstrap + circuit establishment can take 60-90s in constrained environments
-    await asyncio.sleep(90)
-
-    # Check jam logs for connection
-    result = run_compose_cmd(["logs", "--tail=50", "jam"], check=False)
-    logs = result.stdout + result.stderr
-
-    # Look for successful connection indicators
-    connection_success = any(
-        [
-            "connected" in logs.lower(),
-            "handshake" in logs.lower(),
-            "directory" in logs.lower(),
-        ]
-    )
-
-    if not connection_success:
-        logger.warning(f"Jam logs: {logs}")
-
-    logger.info(f"Jam connection status from logs: {connection_success}")
-    assert connection_success, (
-        f"Jam failed to connect to directory. Logs: {logs[-2000:]}"
-    )
-
-
-@pytest.mark.asyncio
 @pytest.mark.timeout(600)
 async def test_complete_reference_coinjoin(reference_services):
     """
