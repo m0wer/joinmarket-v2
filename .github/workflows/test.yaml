@@ -297,8 +297,8 @@ jobs:
           BITCOIN_RPC_USER: test
           BITCOIN_RPC_PASSWORD: test
         run: |
-          # Run e2e tests for our implementation (excludes reference tests)
-          pytest tests/e2e/test_complete_system.py --junitxml=junit/test-results.xml \
+          # Run e2e tests for our implementation (using marker)
+          pytest -m e2e --junitxml=junit/test-results.xml \
             --cov --cov-report=term-missing --cov-report=xml \
             -v -s --timeout=300
 
@@ -417,9 +417,8 @@ jobs:
           BITCOIN_RPC_USER: test
           BITCOIN_RPC_PASSWORD: test
         run: |
-          # Run reference tests with reduced timeout
-          pytest tests/e2e/test_reference_coinjoin.py tests/e2e/test_our_maker_reference_taker.py \
-            --junitxml=junit/test-results.xml \
+          # Run reference tests (using marker)
+          pytest -m reference --junitxml=junit/test-results.xml \
             --cov --cov-report=term-missing --cov-report=xml \
             -v -s --timeout=300
 
@@ -529,8 +528,8 @@ jobs:
           BITCOIN_RPC_PASSWORD: test
           NEUTRINO_URL: http://127.0.0.1:8334
         run: |
-          # Run neutrino-specific tests
-          pytest tests/e2e/test_neutrino_backend.py --junitxml=junit/test-results.xml \
+          # Run neutrino-specific tests (using marker)
+          pytest -m neutrino --junitxml=junit/test-results.xml \
             --cov --cov-report=term-missing --cov-report=xml \
             -v -s --timeout=180
 

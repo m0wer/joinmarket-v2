@@ -33,6 +33,9 @@ import httpx
 import pytest
 from loguru import logger
 
+# Mark all tests in this module as requiring Docker reference profile
+pytestmark = pytest.mark.reference
+
 
 # Timeouts for reference implementation tests
 # Reduced timeouts to fail faster and identify issues
