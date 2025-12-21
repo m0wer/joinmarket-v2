@@ -294,7 +294,7 @@ async def test_maker_bot_initialization(bitcoin_backend, maker_config):
 
     bot = MakerBot(wallet, bitcoin_backend, maker_config)
 
-    assert bot.nick.startswith("J5")
+    assert bot.nick.startswith("J6")
     assert len(bot.nick) == 16
 
     await wallet.close()
@@ -501,8 +501,8 @@ async def test_taker_initialization(bitcoin_backend, taker_config):
 
     taker = Taker(wallet, bitcoin_backend, taker_config)
 
-    # Check nick is generated correctly (J5 prefix for version 5)
-    assert taker.nick.startswith("J5")
+    # Check nick is generated correctly (J6 prefix for version 6)
+    assert taker.nick.startswith("J6")
     assert len(taker.nick) == 16
 
     # Check initial state
