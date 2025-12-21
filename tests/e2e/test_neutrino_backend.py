@@ -388,7 +388,7 @@ async def test_maker_neutrino_initialization(
 
     bot = MakerBot(wallet, neutrino_backend, maker_neutrino_config)
 
-    assert bot.nick.startswith("J5"), "Should generate valid nick"
+    assert bot.nick.startswith("J6"), "Should generate valid nick"
     assert len(bot.nick) == 16, "Nick should be 16 characters"
 
     await wallet.close()
@@ -403,7 +403,7 @@ async def test_maker_neutrino_offer_creation(
     from maker.offers import OfferManager
 
     offer_manager = OfferManager(
-        funded_maker1_neutrino_wallet, maker_neutrino_config, "J5NeutrinoMaker"
+        funded_maker1_neutrino_wallet, maker_neutrino_config, "J6NeutrinoMaker"
     )
 
     offers = await offer_manager.create_offers()
@@ -412,7 +412,7 @@ async def test_maker_neutrino_offer_creation(
         offer = offers[0]
         assert offer.minsize <= offer.maxsize
         assert offer.txfee == maker_neutrino_config.tx_fee_contribution
-        assert offer.counterparty == "J5NeutrinoMaker"
+        assert offer.counterparty == "J6NeutrinoMaker"
 
 
 @pytest.mark.asyncio
@@ -471,7 +471,7 @@ async def test_taker_neutrino_initialization(
 
     taker = Taker(wallet, neutrino_backend, taker_neutrino_config)
 
-    assert taker.nick.startswith("J5"), "Should generate valid nick"
+    assert taker.nick.startswith("J6"), "Should generate valid nick"
     assert len(taker.nick) == 16, "Nick should be 16 characters"
 
     await wallet.close()
@@ -691,7 +691,7 @@ async def test_cross_backend_bitcoin_core_maker_neutrino_taker(
         for offer in offers[:2]:
             assert offer.minsize > 0, "Offer should have valid minsize"
             assert offer.maxsize >= offer.minsize, "Offer should have valid maxsize"
-            assert offer.counterparty.startswith("J5"), (
+            assert offer.counterparty.startswith("J6"), (
                 "Offer should have valid counterparty"
             )
 
@@ -1020,8 +1020,8 @@ async def test_neutrino_fidelity_bond_discovery(
         if bond.private_key and bond.pubkey:
             proof = create_fidelity_bond_proof(
                 bond=bond,
-                maker_nick="J5TestNeutrino",
-                taker_nick="J5TakerNick",
+                maker_nick="J6TestNeutrino",
+                taker_nick="J6TakerNick",
             )
             assert proof is not None, "Should create fidelity bond proof"
             assert len(proof) > 100, "Proof should be substantial base64 string"
@@ -1059,6 +1059,222 @@ async def test_neutrino_watch_outpoint(neutrino_backend: NeutrinoBackend):
 
     # Verify it's in watched set
     assert (test_txid, test_vout) in neutrino_backend._watched_outpoints
+
+
+# ==============================================================================
+# Protocol v6 Neutrino UTXO Verification Tests
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+@pytest.mark.neutrino
+async def test_neutrino_verify_utxo_with_metadata(
+    neutrino_backend: NeutrinoBackend,
+    funded_neutrino_wallet: WalletService,
+):
+    """
+    Test protocol v6 UTXO verification with metadata using neutrino-api v0.4.
+
+    This test verifies the core functionality that enables Neutrino clients
+    to participate in CoinJoin by verifying counterparty UTXOs using the
+    extended metadata (scriptPubKey and blockheight) provided in protocol v6.
+
+    Uses the neutrino-api v0.4 endpoint:
+    GET /v1/utxo/{txid}/{vout}?address=...&start_height=...
+    """
+    # Get a funded UTXO from our wallet
+    utxos = await funded_neutrino_wallet.get_utxos(0)
+    assert len(utxos) > 0, "Should have at least one UTXO"
+
+    utxo = utxos[0]
+    assert utxo.txid, "UTXO should have txid"
+    assert utxo.scriptpubkey, "UTXO should have scriptpubkey"
+    assert utxo.height is not None, "UTXO should have height"
+
+    # Verify the UTXO using metadata
+    result = await neutrino_backend.verify_utxo_with_metadata(
+        txid=utxo.txid,
+        vout=utxo.vout,
+        scriptpubkey=utxo.scriptpubkey,
+        blockheight=utxo.height,
+    )
+
+    assert result.valid, f"UTXO verification should succeed: {result.error}"
+    assert result.value > 0, "Should return UTXO value"
+    assert result.scriptpubkey_matches, "ScriptPubKey should match"
+    assert result.confirmations >= 1, "Should have at least 1 confirmation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.neutrino
+async def test_neutrino_verify_spent_utxo(
+    neutrino_backend: NeutrinoBackend,
+):
+    """
+    Test that spent UTXOs are correctly detected as invalid.
+
+    The neutrino-api v0.4 returns {"unspent": false, "spending_txid": ...}
+    for spent UTXOs.
+    """
+    # Use a known non-existent UTXO
+    result = await neutrino_backend.verify_utxo_with_metadata(
+        txid="0" * 64,  # Non-existent txid
+        vout=0,
+        scriptpubkey="0014" + "00" * 20,  # Valid P2WPKH format
+        blockheight=1,
+    )
+
+    # Should fail because UTXO doesn't exist
+    assert not result.valid, "Non-existent UTXO should fail verification"
+    assert result.error, "Should have error message"
+
+
+@pytest.mark.asyncio
+@pytest.mark.neutrino
+async def test_neutrino_verify_utxo_scriptpubkey_mismatch(
+    neutrino_backend: NeutrinoBackend,
+    funded_neutrino_wallet: WalletService,
+):
+    """
+    Test that scriptPubKey mismatches are correctly detected.
+
+    This is a critical security check - it ensures that the UTXO being
+    verified actually belongs to the claimed scriptPubKey.
+    """
+    # Get a funded UTXO from our wallet
+    utxos = await funded_neutrino_wallet.get_utxos(0)
+    assert len(utxos) > 0, "Should have at least one UTXO"
+
+    utxo = utxos[0]
+
+    # Try to verify with a WRONG scriptPubKey
+    wrong_scriptpubkey = "0014" + "ff" * 20  # Different P2WPKH
+
+    result = await neutrino_backend.verify_utxo_with_metadata(
+        txid=utxo.txid,
+        vout=utxo.vout,
+        scriptpubkey=wrong_scriptpubkey,  # Wrong!
+        blockheight=utxo.height,
+    )
+
+    # The result depends on whether the API can find the UTXO
+    # If found, scriptpubkey_matches should be False
+    # If not found (because wrong address), valid should be False
+    if result.valid:
+        assert not result.scriptpubkey_matches, (
+            "ScriptPubKey mismatch should be detected"
+        )
+    else:
+        # Expected - can't find UTXO with wrong address
+        assert result.error, "Should have error message"
+
+
+@pytest.mark.asyncio
+@pytest.mark.neutrino
+@pytest.mark.slow
+async def test_neutrino_protocol_v6_coinjoin_verification_flow(
+    neutrino_backend: NeutrinoBackend,
+    funded_maker1_neutrino_wallet: WalletService,
+    funded_taker_neutrino_wallet: WalletService,
+):
+    """
+    Test the complete protocol v6 UTXO verification flow for CoinJoin.
+
+    This simulates how two Neutrino peers would verify each other's UTXOs
+    during a CoinJoin using the extended metadata format:
+    - Taker sends !auth with extended UTXO: txid:vout:scriptpubkey:blockheight
+    - Maker verifies taker's UTXO using verify_utxo_with_metadata()
+    - Maker sends !ioauth with extended UTXOs
+    - Taker verifies maker's UTXOs using verify_utxo_with_metadata()
+
+    Both peers use Neutrino backend, demonstrating that Neutrino-only
+    CoinJoin is possible with protocol v6.
+    """
+    from jmcore.protocol import UTXOMetadata, format_utxo_list, parse_utxo_list
+
+    # === Simulate TAKER preparing !auth message ===
+    taker_utxos = await funded_taker_neutrino_wallet.get_utxos(0)
+    assert len(taker_utxos) > 0, "Taker should have UTXOs"
+
+    taker_utxo = taker_utxos[0]
+    assert taker_utxo.scriptpubkey, "Taker UTXO should have scriptpubkey"
+    assert taker_utxo.height is not None, "Taker UTXO should have height"
+
+    # Create extended UTXO metadata (what taker sends in !auth)
+    taker_metadata = UTXOMetadata(
+        txid=taker_utxo.txid,
+        vout=taker_utxo.vout,
+        scriptpubkey=taker_utxo.scriptpubkey,
+        blockheight=taker_utxo.height,
+    )
+
+    # Serialize to extended format
+    taker_utxo_str = taker_metadata.to_extended_str()
+    assert ":" in taker_utxo_str, "Should be in extended format"
+    parts = taker_utxo_str.split(":")
+    assert len(parts) == 4, "Extended format should have 4 parts"
+
+    # === Simulate MAKER receiving and verifying taker's UTXO ===
+    parsed_taker = UTXOMetadata.from_str(taker_utxo_str)
+    assert parsed_taker.has_neutrino_metadata(), "Should have neutrino metadata"
+
+    # Maker verifies taker's UTXO using Neutrino backend
+    taker_verification = await neutrino_backend.verify_utxo_with_metadata(
+        txid=parsed_taker.txid,
+        vout=parsed_taker.vout,
+        scriptpubkey=parsed_taker.scriptpubkey,
+        blockheight=parsed_taker.blockheight,
+    )
+
+    assert taker_verification.valid, (
+        f"Maker should verify taker's UTXO: {taker_verification.error}"
+    )
+    assert taker_verification.value > 0, "Should get UTXO value"
+
+    # === Simulate MAKER preparing !ioauth message ===
+    maker_utxos = await funded_maker1_neutrino_wallet.get_utxos(0)
+    assert len(maker_utxos) > 0, "Maker should have UTXOs"
+
+    # Create extended UTXO list (what maker sends in !ioauth)
+    maker_metadata_list = [
+        UTXOMetadata(
+            txid=utxo.txid,
+            vout=utxo.vout,
+            scriptpubkey=utxo.scriptpubkey,
+            blockheight=utxo.height,
+        )
+        for utxo in maker_utxos[:2]  # Use up to 2 UTXOs
+        if utxo.scriptpubkey and utxo.height is not None
+    ]
+
+    assert len(maker_metadata_list) > 0, "Maker should have UTXOs with metadata"
+
+    # Serialize to extended format
+    maker_utxo_list_str = format_utxo_list(maker_metadata_list, extended=True)
+    assert maker_utxo_list_str, "Should format UTXO list"
+
+    # === Simulate TAKER receiving and verifying maker's UTXOs ===
+    parsed_maker_utxos = parse_utxo_list(maker_utxo_list_str, require_metadata=True)
+
+    for parsed_utxo in parsed_maker_utxos:
+        assert parsed_utxo.has_neutrino_metadata(), "Should have neutrino metadata"
+
+        # Taker verifies maker's UTXO using Neutrino backend
+        maker_verification = await neutrino_backend.verify_utxo_with_metadata(
+            txid=parsed_utxo.txid,
+            vout=parsed_utxo.vout,
+            scriptpubkey=parsed_utxo.scriptpubkey,
+            blockheight=parsed_utxo.blockheight,
+        )
+
+        assert maker_verification.valid, (
+            f"Taker should verify maker's UTXO {parsed_utxo.txid}:{parsed_utxo.vout}: "
+            f"{maker_verification.error}"
+        )
+        assert maker_verification.value > 0, "Should get UTXO value"
+
+    print(f"✓ Successfully verified {len(parsed_maker_utxos)} maker UTXOs")
+    print("✓ Protocol v6 Neutrino-to-Neutrino verification flow complete")
 
 
 if __name__ == "__main__":

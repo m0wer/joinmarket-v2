@@ -140,10 +140,11 @@ class NeutrinoBackend(BlockchainBackend):
 
     async def add_watch_address(self, address: str) -> None:
         """
-        Add an address to watch for relevant transactions.
+        Add an address to the local watch list.
 
-        Neutrino uses compact block filters to check if blocks might
-        contain transactions for watched addresses.
+        In neutrino-api v0.4, address watching is implicit - you just query
+        UTXOs or do rescans with the addresses you care about. This method
+        tracks addresses locally for convenience.
 
         Args:
             address: Bitcoin address to watch
@@ -151,21 +152,15 @@ class NeutrinoBackend(BlockchainBackend):
         if address in self._watched_addresses:
             return
 
-        try:
-            await self._api_call(
-                "POST",
-                "v1/watch/address",
-                data={"address": address},
-            )
-            self._watched_addresses.add(address)
-            logger.debug(f"Watching address: {address}")
-
-        except Exception as e:
-            logger.warning(f"Failed to watch address {address}: {e}")
+        self._watched_addresses.add(address)
+        logger.debug(f"Watching address: {address}")
 
     async def add_watch_outpoint(self, txid: str, vout: int) -> None:
         """
-        Add an outpoint to watch for spending.
+        Add an outpoint to the local watch list.
+
+        In neutrino-api v0.4, outpoint watching is done via UTXO queries
+        with the address parameter. This method tracks outpoints locally.
 
         Args:
             txid: Transaction ID
@@ -175,17 +170,8 @@ class NeutrinoBackend(BlockchainBackend):
         if outpoint in self._watched_outpoints:
             return
 
-        try:
-            await self._api_call(
-                "POST",
-                "v1/watch/outpoint",
-                data={"txid": txid, "vout": vout},
-            )
-            self._watched_outpoints.add(outpoint)
-            logger.debug(f"Watching outpoint: {txid}:{vout}")
-
-        except Exception as e:
-            logger.warning(f"Failed to watch outpoint {txid}:{vout}: {e}")
+        self._watched_outpoints.add(outpoint)
+        logger.debug(f"Watching outpoint: {txid}:{vout}")
 
     async def get_utxos(self, addresses: list[str]) -> list[UTXO]:
         """
@@ -442,18 +428,18 @@ class NeutrinoBackend(BlockchainBackend):
         This is the key method that enables Neutrino light clients to verify
         counterparty UTXOs in CoinJoin without arbitrary blockchain queries.
 
-        Process:
-        1. Convert scriptPubKey to address and add to watch list
-        2. Trigger rescan from the hinted blockheight
-        3. Wait for Neutrino to download relevant blocks via compact filters
-        4. Query the specific UTXO to verify it exists with correct scriptPubKey
-        5. Return verification result with value and confirmations
+        Uses the neutrino-api v0.4 UTXO check endpoint which requires:
+        - address: The Bitcoin address that owns the UTXO (derived from scriptPubKey)
+        - start_height: Block height to start scanning from (for efficiency)
+
+        The API scans from start_height to chain tip using compact block filters
+        to determine if the UTXO exists and whether it has been spent.
 
         Args:
             txid: Transaction ID
             vout: Output index
-            scriptpubkey: Expected scriptPubKey (hex) - used for watch list
-            blockheight: Block height where UTXO was confirmed - rescan hint
+            scriptpubkey: Expected scriptPubKey (hex) - used to derive address
+            blockheight: Block height where UTXO was confirmed - scan start hint
 
         Returns:
             UTXOVerificationResult with verification status and UTXO data
@@ -463,77 +449,45 @@ class NeutrinoBackend(BlockchainBackend):
             f"(scriptpubkey={scriptpubkey[:20]}..., blockheight={blockheight})"
         )
 
-        try:
-            # Step 1: Add scriptPubKey to watch list via the neutrino API
-            # The API should accept scriptPubKey directly or convert to address
-            await self._api_call(
-                "POST",
-                "v1/watch/scriptpubkey",
-                data={"scriptpubkey": scriptpubkey},
+        # Step 1: Derive address from scriptPubKey
+        # The neutrino-api v0.4 requires the address for UTXO lookup
+        address = self._scriptpubkey_to_address(scriptpubkey)
+        if not address:
+            return UTXOVerificationResult(
+                valid=False,
+                error=f"Could not derive address from scriptPubKey: {scriptpubkey[:40]}...",
             )
-            logger.debug(f"Added scriptPubKey to watch list: {scriptpubkey[:20]}...")
 
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                # API endpoint might not exist, try address-based approach
-                logger.debug("scriptpubkey watch not supported, trying address derivation")
-                # Try to derive address from scriptPubKey
-                address = self._scriptpubkey_to_address(scriptpubkey)
-                if address:
-                    await self.add_watch_address(address)
-            else:
-                logger.warning(f"Failed to add scriptPubKey to watch: {e}")
-        except Exception as e:
-            logger.warning(f"Failed to add scriptPubKey to watch: {e}")
-            # Continue anyway - the UTXO might already be watched
+        logger.debug(f"Derived address {address} from scriptPubKey")
 
         try:
-            # Step 2: Trigger rescan from the hinted blockheight
-            # This is more efficient than scanning from genesis
-            await self._api_call(
-                "POST",
-                "v1/rescan",
-                data={
-                    "start_height": blockheight,
-                    "scriptpubkeys": [scriptpubkey],
-                },
-            )
-            logger.debug(f"Triggered rescan from height {blockheight}")
+            # Step 2: Query the specific UTXO using the v0.4 API
+            # GET /v1/utxo/{txid}/{vout}?address=...&start_height=...
+            #
+            # The start_height parameter is critical for performance:
+            # - Scanning 1 block takes ~0.01s
+            # - Scanning 100 blocks takes ~0.5s
+            # - Scanning 10,000+ blocks can take minutes
+            #
+            # We use blockheight - 1 as a safety margin in case of reorgs
+            start_height = max(0, blockheight - 1)
 
-            # Step 3: Wait for rescan to complete
-            # Neutrino needs time to download filters and matching blocks
-            await asyncio.sleep(2.0)  # Initial wait
-
-            # Poll for completion with timeout
-            max_wait = 30.0
-            waited = 0.0
-            while waited < max_wait:
-                try:
-                    status = await self._api_call("GET", "v1/rescan/status")
-                    if status.get("completed", False):
-                        break
-                except Exception:
-                    pass  # Status endpoint might not exist
-                await asyncio.sleep(1.0)
-                waited += 1.0
-
-        except Exception as e:
-            logger.warning(f"Rescan failed (continuing anyway): {e}")
-
-        try:
-            # Step 4: Query the specific UTXO
             result = await self._api_call(
                 "GET",
                 f"v1/utxo/{txid}/{vout}",
+                params={"address": address, "start_height": start_height},
             )
 
-            if not result or result.get("spent", False):
+            # Check if UTXO is unspent
+            if not result.get("unspent", False):
+                spending_txid = result.get("spending_txid", "unknown")
+                spending_height = result.get("spending_height", "unknown")
                 return UTXOVerificationResult(
                     valid=False,
-                    error="UTXO not found or spent after rescan",
+                    error=f"UTXO has been spent in tx {spending_txid} at height {spending_height}",
                 )
 
-            # Step 5: Verify scriptPubKey matches
+            # Step 3: Verify scriptPubKey matches
             actual_scriptpubkey = result.get("scriptpubkey", "")
             scriptpubkey_matches = actual_scriptpubkey.lower() == scriptpubkey.lower()
 
@@ -546,12 +500,10 @@ class NeutrinoBackend(BlockchainBackend):
                     scriptpubkey_matches=False,
                 )
 
-            # Calculate confirmations
+            # Step 4: Calculate confirmations
             tip_height = await self.get_block_height()
-            utxo_height = result.get("height", 0)
-            confirmations = 0
-            if utxo_height > 0:
-                confirmations = tip_height - utxo_height + 1
+            # The blockheight parameter is the confirmation height hint from the peer
+            confirmations = tip_height - blockheight + 1 if blockheight > 0 else 0
 
             logger.info(
                 f"UTXO {txid}:{vout} verified: value={result.get('value', 0)}, "
@@ -569,7 +521,7 @@ class NeutrinoBackend(BlockchainBackend):
             if e.response.status_code == 404:
                 return UTXOVerificationResult(
                     valid=False,
-                    error="UTXO not found after rescan - may not exist or be spent",
+                    error="UTXO not found - may not exist or address derivation failed",
                 )
             return UTXOVerificationResult(
                 valid=False,
@@ -739,24 +691,39 @@ class NeutrinoBackend(BlockchainBackend):
         outpoints: list[tuple[str, int]] | None = None,
     ) -> None:
         """
-        Rescan blockchain from a specific height for addresses/outpoints.
+        Rescan blockchain from a specific height for addresses.
 
         This triggers neutrino to re-check compact block filters from
         the specified height for relevant transactions.
 
+        Uses the neutrino-api v0.4 rescan endpoint:
+        POST /v1/rescan with {"start_height": N, "addresses": [...]}
+
+        Note: The v0.4 API only supports address-based rescans.
+        Outpoints are tracked via address watches instead.
+
         Args:
             start_height: Block height to start rescan from
-            addresses: List of addresses to scan for (optional)
-            outpoints: List of (txid, vout) outpoints to scan for (optional)
+            addresses: List of addresses to scan for (required for v0.4)
+            outpoints: List of (txid, vout) outpoints - not directly supported,
+                      will be ignored (use add_watch_outpoint instead)
         """
-        # Add items to watch first
-        if addresses:
-            for addr in addresses:
-                await self.add_watch_address(addr)
+        if not addresses:
+            logger.warning("Rescan called without addresses - nothing to scan")
+            return
 
+        # Track addresses locally
+        for addr in addresses:
+            self._watched_addresses.add(addr)
+
+        # Note: v0.4 API doesn't support outpoints in rescan
         if outpoints:
+            logger.debug(
+                "Outpoints parameter ignored in v0.4 rescan API. "
+                "Use address-based watching instead."
+            )
             for txid, vout in outpoints:
-                await self.add_watch_outpoint(txid, vout)
+                self._watched_outpoints.add((txid, vout))
 
         try:
             await self._api_call(
@@ -764,11 +731,10 @@ class NeutrinoBackend(BlockchainBackend):
                 "v1/rescan",
                 data={
                     "start_height": start_height,
-                    "addresses": addresses or [],
-                    "outpoints": [{"txid": txid, "vout": vout} for txid, vout in (outpoints or [])],
+                    "addresses": addresses,
                 },
             )
-            logger.info(f"Started rescan from height {start_height}")
+            logger.info(f"Started rescan from height {start_height} for {len(addresses)} addresses")
 
         except Exception as e:
             logger.error(f"Failed to start rescan: {e}")

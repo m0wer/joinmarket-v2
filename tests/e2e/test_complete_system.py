@@ -307,7 +307,7 @@ async def test_offer_creation(
     """Test offer creation based on wallet balance"""
     from maker.offers import OfferManager
 
-    offer_manager = OfferManager(funded_wallet, maker_config, "J5TestMaker")
+    offer_manager = OfferManager(funded_wallet, maker_config, "J6TestMaker")
 
     offers = await offer_manager.create_offers()
 
@@ -315,7 +315,7 @@ async def test_offer_creation(
         offer = offers[0]
         assert offer.minsize <= offer.maxsize
         assert offer.txfee == maker_config.tx_fee_contribution
-        assert offer.counterparty == "J5TestMaker"
+        assert offer.counterparty == "J6TestMaker"
 
 
 @pytest.mark.asyncio
@@ -616,7 +616,7 @@ async def test_taker_orderbook_manager(bitcoin_backend, taker_config):
     # Create some test offers
     test_offers = [
         Offer(
-            counterparty="J5TestMaker1",
+            counterparty="J6TestMaker1",
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=10_000,
@@ -625,7 +625,7 @@ async def test_taker_orderbook_manager(bitcoin_backend, taker_config):
             cjfee="0.0002",
         ),
         Offer(
-            counterparty="J5TestMaker2",
+            counterparty="J6TestMaker2",
             oid=0,
             ordertype=OfferType.SW0_ABSOLUTE,
             minsize=10_000,
@@ -1017,7 +1017,7 @@ async def test_maker_offer_announcement(
     """Test that maker correctly announces offers to directory server."""
     from maker.offers import OfferManager
 
-    offer_manager = OfferManager(funded_maker1_wallet, maker_config, "J5TestMaker")
+    offer_manager = OfferManager(funded_maker1_wallet, maker_config, "J6TestMaker")
 
     offers = await offer_manager.create_offers()
 
@@ -1048,7 +1048,7 @@ async def test_taker_maker_selection(
     # Simulate offers from our test makers
     test_offers = [
         Offer(
-            counterparty="J5Maker1Nick",
+            counterparty="J6Maker1Nick",
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=100_000,
@@ -1057,7 +1057,7 @@ async def test_taker_maker_selection(
             cjfee="0.0003",
         ),
         Offer(
-            counterparty="J5Maker2Nick",
+            counterparty="J6Maker2Nick",
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=100_000,

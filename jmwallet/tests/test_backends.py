@@ -82,20 +82,19 @@ class TestNeutrinoBackend:
 
     @pytest.mark.asyncio
     async def test_neutrino_backend_add_watch_address(self):
-        """Test adding addresses to watch list (without server)."""
+        """Test adding addresses to watch list.
+
+        In neutrino-api v0.4, address watching is done locally without API calls.
+        The addresses are tracked in memory and used when making queries.
+        """
         backend = NeutrinoBackend(neutrino_url="http://localhost:8334")
 
-        # Without a running server, the API call will fail and address won't be added
-        # This test verifies the method handles failures gracefully
         address = "bcrt1q0000000000000000000000000000000000000"
-        try:
-            await backend.add_watch_address(address)
-        except Exception:
-            pass  # Expected to fail without server
+        await backend.add_watch_address(address)
 
-        # Address should NOT be in watched set because API call failed
-        # The actual addition happens only on successful API response
-        assert len(backend._watched_addresses) == 0
+        # Address should be in watched set (local tracking)
+        assert address in backend._watched_addresses
+        assert len(backend._watched_addresses) == 1
         await backend.close()
 
     def test_neutrino_config_init(self):

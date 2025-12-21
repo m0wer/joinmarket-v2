@@ -585,7 +585,7 @@ services:
   # ============================================================================
 
   neutrino:
-    image: ghcr.io/m0wer/neutrino-api:0.2
+    image: ghcr.io/m0wer/neutrino-api:0.4
     container_name: jm-neutrino
     restart: unless-stopped
     environment:
