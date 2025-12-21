@@ -9,6 +9,7 @@ import json
 from jmcore.models import NetworkType, PeerInfo, PeerStatus
 from jmcore.protocol import (
     JM_VERSION,
+    JM_VERSION_MIN,
     NOT_SERVING_ONION_HOSTNAME,
     create_handshake_response,
 )
@@ -46,8 +47,10 @@ class HandshakeHandler:
             if is_directory:
                 raise HandshakeError("Directory nodes not accepted as clients")
 
-            if proto_ver != JM_VERSION:
-                raise HandshakeError(f"Protocol version mismatch: {proto_ver} != {JM_VERSION}")
+            if not (JM_VERSION_MIN <= proto_ver <= JM_VERSION):
+                raise HandshakeError(
+                    f"Protocol version {proto_ver} not in supported range [{JM_VERSION_MIN}, {JM_VERSION}]"
+                )
 
             peer_network = self._parse_network(network_str)
             if peer_network != self.network:
