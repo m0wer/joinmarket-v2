@@ -46,12 +46,15 @@ def are_reference_makers_running() -> bool:
     return is_jam_maker_running(1) and is_jam_maker_running(2)
 
 
-# Skip all tests in this module if reference makers are not running
-pytestmark = pytest.mark.skipif(
-    not are_reference_makers_running(),
-    reason="Reference maker services not running. "
-    "Start with: docker compose --profile reference-maker up -d",
-)
+# Mark all tests in this module as requiring Docker reference-maker profile
+pytestmark = [
+    pytest.mark.reference_maker,
+    pytest.mark.skipif(
+        not are_reference_makers_running(),
+        reason="Reference maker services not running. "
+        "Start with: docker compose --profile reference-maker up -d",
+    ),
+]
 
 
 @pytest.fixture(scope="module")

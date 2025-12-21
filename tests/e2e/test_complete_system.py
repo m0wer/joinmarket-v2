@@ -9,6 +9,8 @@ Tests all components working together:
 - Taker client
 - Wallet synchronization
 - Complete CoinJoin transactions
+
+Requires: docker compose --profile e2e up -d
 """
 
 import asyncio
@@ -23,6 +25,9 @@ from maker.bot import MakerBot
 from maker.config import MakerConfig
 from taker.config import TakerConfig
 from taker.taker import Taker
+
+# Mark all tests in this module as requiring Docker e2e profile
+pytestmark = pytest.mark.e2e
 
 # ==============================================================================
 # Test Wallet Mnemonics (used in successful CoinJoin testing)

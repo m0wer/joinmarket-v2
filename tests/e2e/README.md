@@ -178,18 +178,59 @@ docker compose --profile e2e down -v
 
 ## Running Specific Tests
 
+### Using Pytest Markers (Recommended)
+
+The e2e tests use pytest markers to organize tests by Docker profile. By default,
+running `pytest` excludes all Docker-dependent tests:
+
+```bash
+# Run only unit tests (no Docker needed) - this is the default
+pytest jmcore directory_server orderbook_watcher maker taker
+
+# Run e2e tests (requires: docker compose --profile e2e up -d)
+pytest -m e2e -v
+
+# Run reference tests (requires: docker compose --profile reference up -d)
+pytest -m reference -v
+
+# Run neutrino tests (requires: docker compose --profile neutrino up -d)
+pytest -m neutrino -v
+
+# Run reference-maker tests (requires: docker compose --profile reference-maker up -d)
+pytest -m reference_maker -v
+
+# Run ALL Docker tests (combines all profiles - NOT recommended)
+pytest -m docker -v
+
+# Run all tests including Docker (override default exclusion)
+pytest -m "" -v
+```
+
+### Available Markers
+
+| Marker | Docker Profile | Description |
+|--------|----------------|-------------|
+| `docker` | Any | Base marker for any Docker-dependent test |
+| `e2e` | `e2e` | Our implementation only (maker1, maker2) |
+| `reference` | `reference` | JAM compatibility tests (Tor, JAM) |
+| `neutrino` | `neutrino` | Light client backend tests |
+| `reference_maker` | `reference-maker` | Reference maker + our taker |
+| `slow` | - | Long-running tests (any profile) |
+
+### Running Specific Test Files
+
 ```bash
 # Single test file
-pytest tests/e2e/test_complete_system.py -v
+pytest tests/e2e/test_complete_system.py -v -m e2e
 
 # Single test function
-pytest tests/e2e/test_reference_coinjoin.py::test_execute_reference_coinjoin -v -s
+pytest tests/e2e/test_reference_coinjoin.py::test_execute_reference_coinjoin -v -s -m reference
 
 # With timeout override
-pytest tests/e2e/test_reference_coinjoin.py -v --timeout=600
+pytest -m reference -v --timeout=600
 
 # Skip slow tests
-pytest tests/e2e -v -m "not slow"
+pytest -m "e2e and not slow" -v
 ```
 
 ## Architecture
@@ -398,15 +439,19 @@ docker compose exec bitcoin bitcoin-cli -regtest -rpcuser=test -rpcpassword=test
 
 ## CI/CD
 
-The GitHub Actions workflow runs tests in separate jobs:
+The GitHub Actions workflow runs tests in separate jobs using pytest markers:
 
-| Job | Profile | Tests |
-|-----|---------|-------|
-| `test-e2e` | `e2e` | `test_complete_system.py` |
-| `test-reference` | `reference` | `test_reference_coinjoin.py`, `test_our_maker_reference_taker.py` |
-| `test-neutrino` | `neutrino` | `test_neutrino_backend.py` |
+| Job | Profile | Marker | Description |
+|-----|---------|--------|-------------|
+| `test-jmcore`, `test-taker`, etc. | None | `-m "not docker"` | Unit tests (no Docker) |
+| `test-e2e` | `e2e` | `-m e2e` | Our implementation |
+| `test-reference` | `reference` | `-m reference` | JAM compatibility |
+| `test-neutrino` | `neutrino` | `-m neutrino` | Light client tests |
 
-This separation ensures profiles don't interfere with each other.
+**Key Points:**
+- Unit tests run by default without Docker (markers auto-exclude Docker tests)
+- Docker tests use profile-specific markers
+- Tests are skipped if the required Docker services aren't running
 
 See `.github/workflows/test.yaml` for details.
 

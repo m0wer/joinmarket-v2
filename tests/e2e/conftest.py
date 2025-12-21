@@ -35,29 +35,43 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers."""
-    config.addinivalue_line(
-        "markers",
-        "neutrino: mark test as requiring neutrino backend",
-    )
-    config.addinivalue_line(
-        "markers",
-        "bitcoin_core: mark test as requiring bitcoin_core backend",
-    )
-    config.addinivalue_line(
-        "markers",
-        "slow: mark test as slow running",
-    )
+    """Register custom markers for e2e tests.
+
+    Markers are defined in pytest.ini but we add descriptions here for clarity.
+
+    Docker profile markers (mutually exclusive):
+    - docker: Base marker for any test requiring Docker services
+    - e2e: Tests requiring 'docker compose --profile e2e' (our implementation)
+    - reference: Tests requiring 'docker compose --profile reference' (JAM compatibility)
+    - neutrino: Tests requiring 'docker compose --profile neutrino' (light client)
+    - reference_maker: Tests requiring 'docker compose --profile reference-maker'
+
+    By default, `pytest` excludes docker-marked tests via pytest.ini addopts.
+    To run Docker tests, use `-m docker` or specific profile markers like `-m e2e`.
+    """
+    # Markers are already defined in pytest.ini, but we can add extra info here
+    pass
 
 
 def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """Configure test markers - all backend tests run by default."""
-    # No automatic skipping - all tests should run
-    # Tests will fail if required services are unavailable
-    pass
+    """Auto-add docker marker to tests that have profile-specific markers.
+
+    This ensures that tests marked with e2e, reference, neutrino, or reference_maker
+    are also automatically marked with 'docker', so they get excluded by default.
+    """
+    docker_marker = pytest.mark.docker
+
+    for item in items:
+        # Check if item has any profile-specific marker
+        profile_markers = {"e2e", "reference", "neutrino", "reference_maker"}
+        item_markers = {marker.name for marker in item.iter_markers()}
+
+        # If the test has a profile marker but not 'docker', add 'docker'
+        if item_markers & profile_markers and "docker" not in item_markers:
+            item.add_marker(docker_marker)
 
 
 @pytest.fixture(scope="session")

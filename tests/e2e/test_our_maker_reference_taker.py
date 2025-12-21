@@ -47,12 +47,15 @@ from tests.e2e.test_reference_coinjoin import (
     wait_for_services,
 )
 
-
-# Skip all tests in this module if JAM is not running
-pytestmark = pytest.mark.skipif(
-    not is_jam_running(),
-    reason="Reference services not running. Start with: docker compose --profile reference up -d",
-)
+# Mark all tests in this module as requiring Docker reference profile
+pytestmark = [
+    pytest.mark.reference,
+    pytest.mark.skipif(
+        not is_jam_running(),
+        reason="Reference services not running. Start with: "
+        "docker compose --profile reference up -d",
+    ),
+]
 
 
 @pytest.fixture(scope="module")
