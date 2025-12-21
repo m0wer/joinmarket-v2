@@ -4,7 +4,7 @@ jmcore - Core library for JoinMarket components
 Provides shared functionality for protocol, crypto, and networking.
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 from jmcore.directory_client import DirectoryClient, DirectoryClientError
 from jmcore.encryption import CryptoSession, NaclError
@@ -18,13 +18,25 @@ from jmcore.podle import (
     serialize_revelation,
     verify_podle,
 )
-from jmcore.protocol import JM_VERSION, MessageType, ProtocolMessage
+from jmcore.protocol import (
+    FEATURE_NEUTRINO_COMPAT,
+    JM_VERSION,
+    JM_VERSION_MIN,
+    MessageType,
+    ProtocolMessage,
+    UTXOMetadata,
+    format_utxo_list,
+    parse_utxo_list,
+    peer_supports_neutrino_compat,
+)
 
 __all__ = [
     "CryptoSession",
     "DirectoryClient",
     "DirectoryClientError",
+    "FEATURE_NEUTRINO_COMPAT",
     "JM_VERSION",
+    "JM_VERSION_MIN",
     "MessageEnvelope",
     "MessageType",
     "NaclError",
@@ -32,9 +44,13 @@ __all__ = [
     "PoDLECommitment",
     "PoDLEError",
     "ProtocolMessage",
+    "UTXOMetadata",
     "deserialize_revelation",
+    "format_utxo_list",
     "generate_podle",
     "parse_podle_revelation",
+    "parse_utxo_list",
+    "peer_supports_neutrino_compat",
     "serialize_revelation",
     "verify_podle",
 ]

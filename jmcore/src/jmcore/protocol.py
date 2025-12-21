@@ -1,22 +1,144 @@
 """
 JoinMarket protocol definitions, message types, and serialization.
+
+Protocol Version History:
+- v5: Original JoinMarket protocol (reference implementation compatible)
+- v6: Extended UTXO metadata for Neutrino/light client support
+      - Adds neutrino_compat feature flag in handshake
+      - Extended !auth format: txid:vout:scriptpubkey:blockheight
+      - Extended !ioauth format: includes scriptpubkey:blockheight per UTXO
 """
 
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any
 
 from pydantic import BaseModel
 
-JM_VERSION = 5
+# Protocol version: v6 adds Neutrino-compatible UTXO metadata
+JM_VERSION = 6
+JM_VERSION_MIN = 5  # Minimum version for backward compatibility
+
 COMMAND_PREFIX = "!"
 NICK_PEERLOCATOR_SEPARATOR = ";"
 ONION_VIRTUAL_PORT = 5222
 NOT_SERVING_ONION_HOSTNAME = "NOT-SERVING-ONION"
 NICK_HASH_LENGTH = 10
 NICK_MAX_ENCODED = 14
+
+# Feature flags for capability negotiation
+FEATURE_NEUTRINO_COMPAT = "neutrino_compat"
+
+
+@dataclass
+class UTXOMetadata:
+    """
+    Extended UTXO metadata for Neutrino-compatible verification.
+
+    This allows light clients to verify UTXOs without arbitrary blockchain queries
+    by providing the scriptPubKey (for Neutrino watch list) and block height
+    (for efficient rescan starting point).
+    """
+
+    txid: str
+    vout: int
+    scriptpubkey: str | None = None  # Hex-encoded scriptPubKey
+    blockheight: int | None = None  # Block height where UTXO was confirmed
+
+    def to_legacy_str(self) -> str:
+        """Format as legacy v5 string: txid:vout"""
+        return f"{self.txid}:{self.vout}"
+
+    def to_extended_str(self) -> str:
+        """Format as extended v6 string: txid:vout:scriptpubkey:blockheight"""
+        if self.scriptpubkey is None or self.blockheight is None:
+            return self.to_legacy_str()
+        return f"{self.txid}:{self.vout}:{self.scriptpubkey}:{self.blockheight}"
+
+    @classmethod
+    def from_str(cls, s: str) -> UTXOMetadata:
+        """
+        Parse UTXO string in either legacy or extended format.
+
+        Legacy format: txid:vout
+        Extended format: txid:vout:scriptpubkey:blockheight
+        """
+        parts = s.split(":")
+        if len(parts) == 2:
+            # Legacy format
+            return cls(txid=parts[0], vout=int(parts[1]))
+        elif len(parts) == 4:
+            # Extended format
+            return cls(
+                txid=parts[0],
+                vout=int(parts[1]),
+                scriptpubkey=parts[2],
+                blockheight=int(parts[3]),
+            )
+        else:
+            raise ValueError(f"Invalid UTXO format: {s}")
+
+    def has_neutrino_metadata(self) -> bool:
+        """Check if this UTXO has the metadata needed for Neutrino verification."""
+        return self.scriptpubkey is not None and self.blockheight is not None
+
+    @staticmethod
+    def is_valid_scriptpubkey(scriptpubkey: str) -> bool:
+        """Validate scriptPubKey format (hex string)."""
+        if not scriptpubkey:
+            return False
+        # Must be valid hex
+        if not re.match(r"^[0-9a-fA-F]+$", scriptpubkey):
+            return False
+        # Common scriptPubKey lengths (in hex chars):
+        # P2PKH: 50 (25 bytes), P2SH: 46 (23 bytes)
+        # P2WPKH: 44 (22 bytes), P2WSH: 68 (34 bytes)
+        # P2TR: 68 (34 bytes)
+        return not (len(scriptpubkey) < 4 or len(scriptpubkey) > 200)
+
+
+def parse_utxo_list(utxo_list_str: str, require_metadata: bool = False) -> list[UTXOMetadata]:
+    """
+    Parse a comma-separated list of UTXOs.
+
+    Args:
+        utxo_list_str: Comma-separated UTXOs (legacy or extended format)
+        require_metadata: If True, raise error if any UTXO lacks Neutrino metadata
+
+    Returns:
+        List of UTXOMetadata objects
+    """
+    if not utxo_list_str:
+        return []
+
+    utxos = []
+    for utxo_str in utxo_list_str.split(","):
+        utxo = UTXOMetadata.from_str(utxo_str.strip())
+        if require_metadata and not utxo.has_neutrino_metadata():
+            raise ValueError(f"UTXO {utxo.to_legacy_str()} missing Neutrino metadata")
+        utxos.append(utxo)
+    return utxos
+
+
+def format_utxo_list(utxos: list[UTXOMetadata], extended: bool = False) -> str:
+    """
+    Format a list of UTXOs as comma-separated string.
+
+    Args:
+        utxos: List of UTXOMetadata objects
+        extended: If True, use extended format with scriptpubkey:blockheight
+
+    Returns:
+        Comma-separated UTXO string
+    """
+    if extended:
+        return ",".join(u.to_extended_str() for u in utxos)
+    else:
+        return ",".join(u.to_legacy_str() for u in utxos)
 
 
 class MessageType(IntEnum):
@@ -55,33 +177,93 @@ class ProtocolMessage(BaseModel):
 
 
 def create_handshake_request(
-    nick: str, location: str, network: str, directory: bool = False
+    nick: str,
+    location: str,
+    network: str,
+    directory: bool = False,
+    neutrino_compat: bool = False,
 ) -> dict[str, Any]:
+    """
+    Create a handshake request message.
+
+    Args:
+        nick: Bot nickname
+        location: Onion address or NOT-SERVING-ONION
+        network: Bitcoin network (mainnet, testnet, signet, regtest)
+        directory: True if this is a directory server
+        neutrino_compat: True to advertise Neutrino-compatible UTXO metadata support
+
+    Returns:
+        Handshake request payload dict
+    """
+    features: dict[str, Any] = {}
+    if neutrino_compat:
+        features[FEATURE_NEUTRINO_COMPAT] = True
+
     return {
         "app-name": "joinmarket",
         "directory": directory,
         "location-string": location,
         "proto-ver": JM_VERSION,
-        "features": {},
+        "features": features,
         "nick": nick,
         "network": network,
     }
 
 
 def create_handshake_response(
-    nick: str, network: str, accepted: bool = True, motd: str = "JoinMarket Directory Server"
+    nick: str,
+    network: str,
+    accepted: bool = True,
+    motd: str = "JoinMarket Directory Server",
+    neutrino_compat: bool = False,
 ) -> dict[str, Any]:
+    """
+    Create a handshake response message.
+
+    Args:
+        nick: Directory server nickname
+        network: Bitcoin network
+        accepted: Whether the connection is accepted
+        motd: Message of the day
+        neutrino_compat: True to advertise Neutrino-compatible UTXO metadata support
+
+    Returns:
+        Handshake response payload dict
+    """
+    features: dict[str, Any] = {}
+    if neutrino_compat:
+        features[FEATURE_NEUTRINO_COMPAT] = True
+
     return {
         "app-name": "joinmarket",
         "directory": True,
-        "proto-ver-min": JM_VERSION,
+        "proto-ver-min": JM_VERSION_MIN,
         "proto-ver-max": JM_VERSION,
-        "features": {},
+        "features": features,
         "accepted": accepted,
         "nick": nick,
         "network": network,
         "motd": motd,
     }
+
+
+def peer_supports_neutrino_compat(handshake_data: dict[str, Any]) -> bool:
+    """
+    Check if a peer supports Neutrino-compatible UTXO metadata.
+
+    Args:
+        handshake_data: Handshake payload from peer
+
+    Returns:
+        True if peer advertises neutrino_compat feature
+    """
+    proto_ver = handshake_data.get("proto-ver", 5)
+    if proto_ver < 6:
+        return False
+
+    features = handshake_data.get("features", {})
+    return features.get(FEATURE_NEUTRINO_COMPAT, False)
 
 
 def parse_peer_location(location: str) -> tuple[str, int]:
