@@ -2,8 +2,6 @@
 
 Modern Hierarchical Deterministic (HD) wallet implementation for JoinMarket refactor.
 
-![Status](https://img.shields.io/badge/status-completed-green.svg)
-
 ```
 jmwallet/
 ├── src/jmwallet/
@@ -14,7 +12,7 @@ jmwallet/
 └── pyproject.toml       # Package metadata
 ```
 
-## ✨ Features
+## Features
 
 - **Multi-backend architecture** (Bitcoin Core RPC, Neutrino SPV)
 - **No BerkeleyDB dependency** (works with Bitcoin Core v30+)
@@ -24,20 +22,20 @@ jmwallet/
 - **UTXO management + coin selection**
 - **Transaction signing utilities** (P2WPKH inputs)
 
-## ✅ Solving the BerkeleyDB Problem
+### Solving the BerkeleyDB Problem
 
 Reference JoinMarket requires Bitcoin Core wallet (BerkeleyDB) for `importaddress`, which breaks on Bitcoin Core v30+.
 
 **jmwallet solution:** Connect directly to Bitcoin Core's RPCs (`scantxoutset`, `getblockchaininfo`, etc.) — **no wallet.dat needed!** This makes it compatible with modern Bitcoin Core without deprecated settings.
 
-## 📦 Installation
+## Installation
 
 ```bash
 cd jmwallet
 pip install -e .[dev]
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ```python
 import asyncio
@@ -67,7 +65,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## 🔌 Backends
+## Backends
 
 ### Bitcoin Core Backend
 - Uses `scantxoutset` RPC to find UTXOs
@@ -116,44 +114,5 @@ docker run -d \
   -v neutrino-data:/data/neutrino \
   -e NETWORK=mainnet \
   -e LOG_LEVEL=info \
-  ghcr.io/m0wer/neutrino-api:0.2
+  ghcr.io/m0wer/neutrino-api
 ```
-
-### Mempool Backend (Deprecated)
-- Uses Mempool.space API
-- No local node required
-- **Note:** Being phased out in favor of Neutrino
-
-(Upcoming: Electrum backend)
-
-## 🧪 Testing
-
-```bash
-# Unit tests
-pytest tests/ -v
-
-# Type checking
-mypy src/
-
-# Linting
-ruff check src/ tests/
-```
-
-## 📚 Components
-
-| Module | Description |
-|--------|-------------|
-| `wallet/bip32.py` | HD key derivation (BIP32) |
-| `wallet/address.py` | Bech32 address generation (BIP173) |
-| `wallet/service.py` | Wallet operations (balance, UTXOs, mixdepths) |
-| `wallet/signing.py` | P2WPKH transaction signing |
-| `backends/bitcoin_core.py` | Bitcoin Core RPC backend |
-| `backends/neutrino.py` | Neutrino BIP157/158 SPV backend |
-| `backends/mempool.py` | Mempool.space API backend (deprecated) |
-
-## 🛡️ Security Notes
-
-- All derivations and signing use `cryptography` (secp256k1)
-- PoDLE verification and transaction verification handled in `maker` module
-- Do not use real mainnet mnemonics for testing
-- Transaction signing currently supports P2WPKH inputs
