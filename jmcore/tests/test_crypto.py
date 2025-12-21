@@ -33,7 +33,7 @@ def test_base58_encode():
 
 def test_generate_jm_nick():
     nick = generate_jm_nick()
-    assert nick.startswith("J5")
+    assert nick.startswith("J6")
     # Check general structure if possible, but it's hash based
 
 

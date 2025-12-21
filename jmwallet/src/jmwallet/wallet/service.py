@@ -201,6 +201,7 @@ class WalletService:
                                 scriptpubkey=utxo.scriptpubkey,
                                 path=path,
                                 mixdepth=mixdepth,
+                                height=utxo.height,
                             )
                             utxos.append(utxo_info)
                     else:
@@ -279,6 +280,7 @@ class WalletService:
                                 scriptpubkey=utxo.scriptpubkey,
                                 path=path,
                                 mixdepth=0,  # Fidelity bonds always in mixdepth 0
+                                height=utxo.height,
                             )
                             utxos.append(utxo_info)
                             logger.info(

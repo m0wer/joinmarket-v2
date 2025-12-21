@@ -20,6 +20,7 @@ Reference: https://gist.github.com/AdamISZ/9cbba5e9408d23813ca8
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from jmcore.podle import (
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from jmwallet.wallet.models import UTXOInfo
 
 __all__ = [
+    "ExtendedPoDLECommitment",
     "PoDLECommitment",
     "PoDLEError",
     "generate_podle",
@@ -41,6 +43,73 @@ __all__ = [
     "select_podle_utxo",
     "serialize_revelation",
 ]
+
+
+@dataclass
+class ExtendedPoDLECommitment:
+    """
+    PoDLE commitment with extended UTXO metadata for v6 protocol.
+
+    This extends the base PoDLECommitment with scriptpubkey and blockheight
+    for Neutrino-compatible UTXO verification.
+    """
+
+    commitment: PoDLECommitment
+    scriptpubkey: str | None = None  # Hex-encoded scriptPubKey
+    blockheight: int | None = None  # Block height where UTXO was confirmed
+
+    # Expose underlying commitment properties for compatibility
+    @property
+    def p(self) -> bytes:
+        """Public key P = k*G"""
+        return self.commitment.p
+
+    @property
+    def p2(self) -> bytes:
+        """Commitment point P2 = k*J"""
+        return self.commitment.p2
+
+    @property
+    def sig(self) -> bytes:
+        """Schnorr signature s"""
+        return self.commitment.sig
+
+    @property
+    def e(self) -> bytes:
+        """Challenge e"""
+        return self.commitment.e
+
+    @property
+    def utxo(self) -> str:
+        """UTXO reference txid:vout"""
+        return self.commitment.utxo
+
+    @property
+    def index(self) -> int:
+        """NUMS point index used"""
+        return self.commitment.index
+
+    def to_revelation(self, extended: bool = False) -> dict[str, str]:
+        """
+        Convert to revelation format for sending to maker.
+
+        Args:
+            extended: If True, include scriptpubkey:blockheight in utxo string
+        """
+        rev = self.commitment.to_revelation()
+        if extended and self.scriptpubkey and self.blockheight is not None:
+            # Replace utxo with extended format: txid:vout:scriptpubkey:blockheight
+            txid, vout = self.commitment.utxo.split(":")
+            rev["utxo"] = f"{txid}:{vout}:{self.scriptpubkey}:{self.blockheight}"
+        return rev
+
+    def to_commitment_str(self) -> str:
+        """Get commitment as hex string."""
+        return self.commitment.to_commitment_str()
+
+    def has_neutrino_metadata(self) -> bool:
+        """Check if we have metadata for Neutrino-compatible verification."""
+        return self.scriptpubkey is not None and self.blockheight is not None
 
 
 def select_podle_utxo(
@@ -95,7 +164,7 @@ def generate_podle_for_coinjoin(
     min_confirmations: int = 5,
     min_percent: int = 20,
     index: int = 0,
-) -> PoDLECommitment | None:
+) -> ExtendedPoDLECommitment | None:
     """
     Generate PoDLE for a CoinJoin transaction.
 
@@ -108,7 +177,7 @@ def generate_podle_for_coinjoin(
         index: NUMS point index
 
     Returns:
-        PoDLECommitment or None if no suitable UTXO
+        ExtendedPoDLECommitment with UTXO metadata or None if no suitable UTXO
     """
     utxo = select_podle_utxo(
         utxos=wallet_utxos,
@@ -128,8 +197,15 @@ def generate_podle_for_coinjoin(
 
     utxo_str = f"{utxo.txid}:{utxo.vout}"
 
-    return generate_podle(
+    commitment = generate_podle(
         private_key_bytes=private_key,
         utxo_str=utxo_str,
         index=index,
+    )
+
+    # Return extended commitment with UTXO metadata for v6 protocol
+    return ExtendedPoDLECommitment(
+        commitment=commitment,
+        scriptpubkey=utxo.scriptpubkey,
+        blockheight=utxo.height,
     )

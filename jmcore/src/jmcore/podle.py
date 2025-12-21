@@ -328,10 +328,11 @@ def parse_podle_revelation(revelation: dict[str, Any]) -> dict[str, Any] | None:
         'P2': <hex string>,
         'sig': <hex string>,
         'e': <hex string>,
-        'utxo': <txid:vout string>
+        'utxo': <txid:vout or txid:vout:scriptpubkey:blockheight string>
     }
 
-    Returns parsed structure with bytes or None if invalid.
+    Returns parsed structure with bytes, or None if invalid.
+    Extended format includes scriptpubkey and blockheight for v6 protocol.
     """
     try:
         required_fields = ["P", "P2", "sig", "e", "utxo"]
@@ -346,14 +347,25 @@ def parse_podle_revelation(revelation: dict[str, Any]) -> dict[str, Any] | None:
         e_bytes = bytes.fromhex(revelation["e"])
 
         utxo_parts = revelation["utxo"].split(":")
-        if len(utxo_parts) != 2:
+
+        # Legacy format: txid:vout (2 parts)
+        # Extended format: txid:vout:scriptpubkey:blockheight (4 parts)
+        if len(utxo_parts) == 2:
+            txid = utxo_parts[0]
+            vout = int(utxo_parts[1])
+            scriptpubkey = None
+            blockheight = None
+        elif len(utxo_parts) == 4:
+            txid = utxo_parts[0]
+            vout = int(utxo_parts[1])
+            scriptpubkey = utxo_parts[2]
+            blockheight = int(utxo_parts[3])
+            logger.debug(f"Parsed extended UTXO format: {txid}:{vout} with metadata")
+        else:
             logger.warning(f"Invalid UTXO format: {revelation['utxo']}")
             return None
 
-        txid = utxo_parts[0]
-        vout = int(utxo_parts[1])
-
-        return {
+        result: dict[str, Any] = {
             "P": p_bytes,
             "P2": p2_bytes,
             "sig": sig_bytes,
@@ -361,6 +373,14 @@ def parse_podle_revelation(revelation: dict[str, Any]) -> dict[str, Any] | None:
             "txid": txid,
             "vout": vout,
         }
+
+        # Add extended metadata if present
+        if scriptpubkey is not None:
+            result["scriptpubkey"] = scriptpubkey
+        if blockheight is not None:
+            result["blockheight"] = blockheight
+
+        return result
 
     except Exception as e:
         logger.error(f"Failed to parse PoDLE revelation: {e}")

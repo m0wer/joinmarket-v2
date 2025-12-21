@@ -12,6 +12,8 @@ import secrets
 from coincurve import PrivateKey, PublicKey
 from coincurve import verify_signature as coincurve_verify
 
+from jmcore.protocol import JM_VERSION
+
 BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 NICK_HASH_LENGTH = 10
 NICK_MAX_ENCODED = 14
@@ -38,7 +40,7 @@ def base58_encode(data: bytes) -> str:
     return result
 
 
-def generate_jm_nick(version: int = 5) -> str:
+def generate_jm_nick(version: int = JM_VERSION) -> str:
     privkey_bytes = secrets.token_bytes(32)
     private_key = PrivateKey(privkey_bytes)
     # Use compressed pubkey (33 bytes) - matches reference implementation

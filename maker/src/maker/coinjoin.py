@@ -18,6 +18,7 @@ from typing import Any
 
 from jmcore.encryption import CryptoSession
 from jmcore.models import NetworkType, Offer
+from jmcore.protocol import UTXOMetadata, format_utxo_list
 from jmwallet.backends.base import BlockchainBackend
 from jmwallet.wallet.models import UTXOInfo
 from jmwallet.wallet.service import WalletService
@@ -81,6 +82,9 @@ class CoinJoinSession:
         self.commitment = b""
         self.taker_nacl_pk = ""  # Taker's NaCl pubkey (hex) for btc_sig
         self.created_at = time.time()
+
+        # Protocol v6: Track if peer supports extended UTXO metadata
+        self.peer_supports_v6 = False
 
         # E2E encryption session with taker
         self.crypto = CryptoSession()
@@ -186,22 +190,56 @@ class CoinJoinSession:
             utxo_txid = parsed_rev["txid"]
             utxo_vout = parsed_rev["vout"]
 
+            # Check for extended UTXO metadata (protocol v6)
+            # The revelation may include scriptpubkey and blockheight
+            taker_scriptpubkey = parsed_rev.get("scriptpubkey")
+            taker_blockheight = parsed_rev.get("blockheight")
+
+            # Track if taker sent extended format (v6 capable)
+            if taker_scriptpubkey and taker_blockheight is not None:
+                self.peer_supports_v6 = True
+                logger.debug("Taker sent extended UTXO format (v6)")
+
             # Verify the taker's UTXO exists on the blockchain
-            taker_utxo = await self.backend.get_utxo(utxo_txid, utxo_vout)
+            # Use Neutrino-compatible verification if backend requires it and metadata available
+            if (
+                self.backend.requires_neutrino_metadata()
+                and taker_scriptpubkey
+                and taker_blockheight is not None
+            ):
+                # Neutrino backend: use metadata-based verification
+                result = await self.backend.verify_utxo_with_metadata(
+                    txid=utxo_txid,
+                    vout=utxo_vout,
+                    scriptpubkey=taker_scriptpubkey,
+                    blockheight=taker_blockheight,
+                )
+                if not result.valid:
+                    return False, {"error": f"Taker's UTXO verification failed: {result.error}"}
 
-            if not taker_utxo:
-                return False, {"error": "Taker's UTXO not found on blockchain"}
+                taker_utxo_value = result.value
+                taker_utxo_confirmations = result.confirmations
+                logger.debug(f"Neutrino-verified taker's UTXO: {utxo_txid}:{utxo_vout}")
+            else:
+                # Full node: direct UTXO lookup
+                taker_utxo = await self.backend.get_utxo(utxo_txid, utxo_vout)
 
-            if taker_utxo.confirmations < self.taker_utxo_age:
+                if not taker_utxo:
+                    return False, {"error": "Taker's UTXO not found on blockchain"}
+
+                taker_utxo_value = taker_utxo.value
+                taker_utxo_confirmations = taker_utxo.confirmations
+
+            if taker_utxo_confirmations < self.taker_utxo_age:
                 return False, {
                     "error": f"Taker's UTXO too young: "
-                    f"{taker_utxo.confirmations} < {self.taker_utxo_age}"
+                    f"{taker_utxo_confirmations} < {self.taker_utxo_age}"
                 }
 
             required_amount = int(self.amount * self.taker_utxo_amtpercent / 100)
-            if taker_utxo.value < required_amount:
+            if taker_utxo_value < required_amount:
                 return False, {
-                    "error": f"Taker's UTXO too small: {taker_utxo.value} < {required_amount}"
+                    "error": f"Taker's UTXO too small: {taker_utxo_value} < {required_amount}"
                 }
 
             logger.info("Taker's UTXO validated ✓")
@@ -216,8 +254,24 @@ class CoinJoinSession:
             self.change_address = change_addr
             self.mixdepth = mixdepth
 
-            # Format UTXOs as comma-separated list: "txid:vout,txid:vout,..."
-            utxo_list_str = ",".join(f"{txid}:{vout}" for txid, vout in utxos_dict.keys())
+            # Format UTXOs: extended format (v6) includes scriptpubkey:blockheight
+            # Legacy format (v5) is just txid:vout
+            utxo_metadata_list = [
+                UTXOMetadata(
+                    txid=txid,
+                    vout=vout,
+                    scriptpubkey=utxo_info.scriptpubkey,
+                    blockheight=utxo_info.height,
+                )
+                for (txid, vout), utxo_info in utxos_dict.items()
+            ]
+
+            # Use extended format if peer supports v6 protocol
+            utxo_list_str = format_utxo_list(utxo_metadata_list, extended=self.peer_supports_v6)
+            if self.peer_supports_v6:
+                logger.debug("Using extended UTXO format for v6 peer")
+            else:
+                logger.debug("Using legacy UTXO format for v5 peer")
 
             # Get EC key for our first UTXO to sign taker's encryption key
             # This proves we own the UTXO we're contributing

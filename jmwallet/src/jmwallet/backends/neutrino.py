@@ -8,6 +8,15 @@ The Neutrino client runs as a separate Go process and communicates via gRPC.
 This backend wraps the neutrino gRPC API for the JoinMarket wallet.
 
 Reference: https://github.com/lightninglabs/neutrino
+
+Protocol v6 Support:
+This backend implements verify_utxo_with_metadata() for Neutrino-compatible
+UTXO verification. When peers provide scriptPubKey and blockheight hints
+(protocol v6), this backend can verify UTXOs without arbitrary queries by:
+1. Adding the scriptPubKey to the watch list
+2. Rescanning from the hinted blockheight
+3. Downloading matching blocks via compact block filters
+4. Extracting and verifying the UTXO
 """
 
 from __future__ import annotations
@@ -18,7 +27,12 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from jmwallet.backends.base import UTXO, BlockchainBackend, Transaction
+from jmwallet.backends.base import (
+    UTXO,
+    BlockchainBackend,
+    Transaction,
+    UTXOVerificationResult,
+)
 
 
 class NeutrinoBackend(BlockchainBackend):
@@ -402,6 +416,294 @@ class NeutrinoBackend(BlockchainBackend):
         except Exception as e:
             logger.error(f"Failed to get UTXO {txid}:{vout}: {e}")
             return None
+
+    def requires_neutrino_metadata(self) -> bool:
+        """
+        Neutrino backend requires metadata for arbitrary UTXO verification.
+
+        Without scriptPubKey and blockheight hints, Neutrino cannot verify
+        UTXOs that it hasn't been watching from the start.
+
+        Returns:
+            True - Neutrino always requires metadata for counterparty UTXOs
+        """
+        return True
+
+    async def verify_utxo_with_metadata(
+        self,
+        txid: str,
+        vout: int,
+        scriptpubkey: str,
+        blockheight: int,
+    ) -> UTXOVerificationResult:
+        """
+        Verify a UTXO using provided metadata (protocol v6 Neutrino-compatible).
+
+        This is the key method that enables Neutrino light clients to verify
+        counterparty UTXOs in CoinJoin without arbitrary blockchain queries.
+
+        Process:
+        1. Convert scriptPubKey to address and add to watch list
+        2. Trigger rescan from the hinted blockheight
+        3. Wait for Neutrino to download relevant blocks via compact filters
+        4. Query the specific UTXO to verify it exists with correct scriptPubKey
+        5. Return verification result with value and confirmations
+
+        Args:
+            txid: Transaction ID
+            vout: Output index
+            scriptpubkey: Expected scriptPubKey (hex) - used for watch list
+            blockheight: Block height where UTXO was confirmed - rescan hint
+
+        Returns:
+            UTXOVerificationResult with verification status and UTXO data
+        """
+        logger.debug(
+            f"Verifying UTXO {txid}:{vout} with metadata "
+            f"(scriptpubkey={scriptpubkey[:20]}..., blockheight={blockheight})"
+        )
+
+        try:
+            # Step 1: Add scriptPubKey to watch list via the neutrino API
+            # The API should accept scriptPubKey directly or convert to address
+            await self._api_call(
+                "POST",
+                "v1/watch/scriptpubkey",
+                data={"scriptpubkey": scriptpubkey},
+            )
+            logger.debug(f"Added scriptPubKey to watch list: {scriptpubkey[:20]}...")
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # API endpoint might not exist, try address-based approach
+                logger.debug("scriptpubkey watch not supported, trying address derivation")
+                # Try to derive address from scriptPubKey
+                address = self._scriptpubkey_to_address(scriptpubkey)
+                if address:
+                    await self.add_watch_address(address)
+            else:
+                logger.warning(f"Failed to add scriptPubKey to watch: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to add scriptPubKey to watch: {e}")
+            # Continue anyway - the UTXO might already be watched
+
+        try:
+            # Step 2: Trigger rescan from the hinted blockheight
+            # This is more efficient than scanning from genesis
+            await self._api_call(
+                "POST",
+                "v1/rescan",
+                data={
+                    "start_height": blockheight,
+                    "scriptpubkeys": [scriptpubkey],
+                },
+            )
+            logger.debug(f"Triggered rescan from height {blockheight}")
+
+            # Step 3: Wait for rescan to complete
+            # Neutrino needs time to download filters and matching blocks
+            await asyncio.sleep(2.0)  # Initial wait
+
+            # Poll for completion with timeout
+            max_wait = 30.0
+            waited = 0.0
+            while waited < max_wait:
+                try:
+                    status = await self._api_call("GET", "v1/rescan/status")
+                    if status.get("completed", False):
+                        break
+                except Exception:
+                    pass  # Status endpoint might not exist
+                await asyncio.sleep(1.0)
+                waited += 1.0
+
+        except Exception as e:
+            logger.warning(f"Rescan failed (continuing anyway): {e}")
+
+        try:
+            # Step 4: Query the specific UTXO
+            result = await self._api_call(
+                "GET",
+                f"v1/utxo/{txid}/{vout}",
+            )
+
+            if not result or result.get("spent", False):
+                return UTXOVerificationResult(
+                    valid=False,
+                    error="UTXO not found or spent after rescan",
+                )
+
+            # Step 5: Verify scriptPubKey matches
+            actual_scriptpubkey = result.get("scriptpubkey", "")
+            scriptpubkey_matches = actual_scriptpubkey.lower() == scriptpubkey.lower()
+
+            if not scriptpubkey_matches:
+                return UTXOVerificationResult(
+                    valid=False,
+                    value=result.get("value", 0),
+                    error=f"ScriptPubKey mismatch: expected {scriptpubkey[:20]}..., "
+                    f"got {actual_scriptpubkey[:20]}...",
+                    scriptpubkey_matches=False,
+                )
+
+            # Calculate confirmations
+            tip_height = await self.get_block_height()
+            utxo_height = result.get("height", 0)
+            confirmations = 0
+            if utxo_height > 0:
+                confirmations = tip_height - utxo_height + 1
+
+            logger.info(
+                f"UTXO {txid}:{vout} verified: value={result.get('value', 0)}, "
+                f"confirmations={confirmations}"
+            )
+
+            return UTXOVerificationResult(
+                valid=True,
+                value=result.get("value", 0),
+                confirmations=confirmations,
+                scriptpubkey_matches=True,
+            )
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return UTXOVerificationResult(
+                    valid=False,
+                    error="UTXO not found after rescan - may not exist or be spent",
+                )
+            return UTXOVerificationResult(
+                valid=False,
+                error=f"UTXO query failed: {e}",
+            )
+        except Exception as e:
+            return UTXOVerificationResult(
+                valid=False,
+                error=f"Verification failed: {e}",
+            )
+
+    def _scriptpubkey_to_address(self, scriptpubkey: str) -> str | None:
+        """
+        Convert scriptPubKey to address for watch list.
+
+        Supports common script types:
+        - P2WPKH: 0014<20-byte-hash> -> bc1q...
+        - P2WSH: 0020<32-byte-hash> -> bc1q...
+        - P2PKH: 76a914<20-byte-hash>88ac -> 1...
+        - P2SH: a914<20-byte-hash>87 -> 3...
+
+        Args:
+            scriptpubkey: Hex-encoded scriptPubKey
+
+        Returns:
+            Bitcoin address or None if conversion fails
+        """
+        try:
+            script_bytes = bytes.fromhex(scriptpubkey)
+
+            # P2WPKH: OP_0 <20 bytes>
+            if len(script_bytes) == 22 and script_bytes[0] == 0x00 and script_bytes[1] == 0x14:
+                # Use bech32 encoding
+                return self._encode_bech32_address(script_bytes[2:], 0)
+
+            # P2WSH: OP_0 <32 bytes>
+            if len(script_bytes) == 34 and script_bytes[0] == 0x00 and script_bytes[1] == 0x20:
+                return self._encode_bech32_address(script_bytes[2:], 0)
+
+            # P2PKH: OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+            if (
+                len(script_bytes) == 25
+                and script_bytes[0] == 0x76
+                and script_bytes[1] == 0xA9
+                and script_bytes[2] == 0x14
+                and script_bytes[23] == 0x88
+                and script_bytes[24] == 0xAC
+            ):
+                return self._encode_base58check_address(script_bytes[3:23], 0x00)
+
+            # P2SH: OP_HASH160 <20 bytes> OP_EQUAL
+            if (
+                len(script_bytes) == 23
+                and script_bytes[0] == 0xA9
+                and script_bytes[1] == 0x14
+                and script_bytes[22] == 0x87
+            ):
+                return self._encode_base58check_address(script_bytes[2:22], 0x05)
+
+            logger.warning(f"Unknown scriptPubKey format: {scriptpubkey[:20]}...")
+            return None
+
+        except Exception as e:
+            logger.warning(f"Failed to convert scriptPubKey to address: {e}")
+            return None
+
+    def _encode_bech32_address(self, witness_program: bytes, witness_version: int) -> str:
+        """Encode witness program as bech32 address."""
+        # Simplified bech32 encoding - in production use a proper library
+        hrp = "bc" if self.network == "mainnet" else "bcrt" if self.network == "regtest" else "tb"
+
+        # Convert witness program to 5-bit groups
+        def convertbits(data: bytes, frombits: int, tobits: int, pad: bool = True) -> list[int]:
+            acc = 0
+            bits = 0
+            ret = []
+            maxv = (1 << tobits) - 1
+            for value in data:
+                acc = (acc << frombits) | value
+                bits += frombits
+                while bits >= tobits:
+                    bits -= tobits
+                    ret.append((acc >> bits) & maxv)
+            if pad and bits:
+                ret.append((acc << (tobits - bits)) & maxv)
+            return ret
+
+        charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+        def bech32_polymod(values: list[int]) -> int:
+            gen = [0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3]
+            chk = 1
+            for v in values:
+                b = chk >> 25
+                chk = ((chk & 0x1FFFFFF) << 5) ^ v
+                for i in range(5):
+                    chk ^= gen[i] if ((b >> i) & 1) else 0
+            return chk
+
+        def bech32_hrp_expand(hrp: str) -> list[int]:
+            return [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp]
+
+        def bech32_create_checksum(hrp: str, data: list[int]) -> list[int]:
+            values = bech32_hrp_expand(hrp) + data
+            polymod = bech32_polymod(values + [0, 0, 0, 0, 0, 0]) ^ 1
+            return [(polymod >> 5 * (5 - i)) & 31 for i in range(6)]
+
+        data = [witness_version] + convertbits(witness_program, 8, 5)
+        checksum = bech32_create_checksum(hrp, data)
+        return hrp + "1" + "".join(charset[d] for d in data + checksum)
+
+    def _encode_base58check_address(self, payload: bytes, version: int) -> str:
+        """Encode payload as base58check address."""
+        import hashlib
+
+        versioned = bytes([version]) + payload
+        checksum = hashlib.sha256(hashlib.sha256(versioned).digest()).digest()[:4]
+        data = versioned + checksum
+
+        ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"  # noqa: N806
+        n = int.from_bytes(data, "big")
+        result = ""
+        while n > 0:
+            n, r = divmod(n, 58)
+            result = ALPHABET[r] + result
+
+        # Add leading zeros
+        for byte in data:
+            if byte == 0:
+                result = "1" + result
+            else:
+                break
+
+        return result
 
     async def get_filter_header(self, block_height: int) -> str:
         """

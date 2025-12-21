@@ -19,6 +19,7 @@ class UTXOInfo:
     scriptpubkey: str
     path: str
     mixdepth: int
+    height: int | None = None  # Block height where UTXO was confirmed (for Neutrino)
 
 
 @dataclass

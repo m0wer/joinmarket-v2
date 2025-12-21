@@ -23,7 +23,7 @@ from jmcore.crypto import generate_jm_nick
 from jmcore.directory_client import DirectoryClient
 from jmcore.encryption import CryptoSession
 from jmcore.models import Offer
-from jmcore.protocol import JM_VERSION
+from jmcore.protocol import JM_VERSION, parse_utxo_list
 from jmwallet.backends.base import BlockchainBackend
 from jmwallet.wallet.models import UTXOInfo
 from jmwallet.wallet.service import WalletService
@@ -38,7 +38,7 @@ from loguru import logger
 
 from taker.config import Schedule, TakerConfig
 from taker.orderbook import OrderbookManager, calculate_cj_fee
-from taker.podle import PoDLECommitment, generate_podle_for_coinjoin
+from taker.podle import ExtendedPoDLECommitment, generate_podle_for_coinjoin
 from taker.tx_builder import CoinJoinTxBuilder, build_coinjoin_tx
 
 
@@ -213,6 +213,7 @@ class MakerSession:
     responded_fill: bool = False
     responded_auth: bool = False
     responded_sig: bool = False
+    supports_v6: bool = False  # Protocol v6: supports extended UTXO metadata
 
 
 class Taker:
@@ -254,7 +255,7 @@ class Taker:
         # Current CoinJoin session data
         self.cj_amount = 0
         self.maker_sessions: dict[str, MakerSession] = {}
-        self.podle_commitment: PoDLECommitment | None = None
+        self.podle_commitment: ExtendedPoDLECommitment | None = None
         self.unsigned_tx: bytes = b""
         self.tx_metadata: dict[str, Any] = {}
         self.final_tx: bytes = b""
@@ -531,9 +532,16 @@ class Taker:
         if not self.podle_commitment:
             return False
 
+        # Check if we need extended format for Neutrino backend
+        use_extended_format = (
+            self.backend.requires_neutrino_metadata()
+            and self.podle_commitment.has_neutrino_metadata()
+        )
+
         # Create pipe-separated revelation format expected by maker:
-        # txid:vout|P|P2|sig|e
-        revelation = self.podle_commitment.to_revelation()
+        # Legacy (v5): txid:vout|P|P2|sig|e
+        # Extended (v6): txid:vout:scriptpubkey:blockheight|P|P2|sig|e
+        revelation = self.podle_commitment.to_revelation(extended=use_extended_format)
         revelation_str = "|".join(
             [
                 revelation["utxo"],
@@ -543,6 +551,9 @@ class Taker:
                 revelation["e"],
             ]
         )
+
+        if use_extended_format:
+            logger.debug("Using extended UTXO format in !auth for Neutrino compatibility")
 
         # Send !auth to all makers with ENCRYPTED revelation
         for nick, session in self.maker_sessions.items():
@@ -569,7 +580,9 @@ class Taker:
         # Process responses
         # Maker sends !ioauth as ENCRYPTED space-separated:
         # <utxo_list> <auth_pub> <cj_addr> <change_addr> <btc_sig>
-        # where utxo_list is comma-separated: txid:vout,txid:vout,...
+        # where utxo_list can be:
+        # - Legacy (v5): txid:vout,txid:vout,...
+        # - Extended (v6): txid:vout:scriptpubkey:blockheight,...
         # Response format from directory: "<encrypted_data> <signing_pubkey> <signature>"
         for nick in list(self.maker_sessions.keys()):
             if nick in responses:
@@ -604,7 +617,7 @@ class Taker:
                         del self.maker_sessions[nick]
                         continue
 
-                    utxo_list = ioauth_parts[0]
+                    utxo_list_str = ioauth_parts[0]
                     auth_pub = ioauth_parts[1]
                     cj_addr = ioauth_parts[2]
                     change_addr = ioauth_parts[3]
@@ -636,18 +649,49 @@ class Taker:
                         else:
                             logger.info(f"BTC signature verified for {nick} ✓")
 
-                    # Parse utxo_list: "txid:vout,txid:vout,..."
-                    # Then fetch UTXO values from blockchain
+                    # Parse utxo_list using protocol helper (handles both v5 and v6 format)
+                    # Then verify each UTXO using the appropriate backend method
                     session.utxos = []
-                    for utxo_str in utxo_list.split(","):
-                        if ":" in utxo_str:
-                            txid, vout = utxo_str.split(":", 1)
-                            vout_int = int(vout)
+                    utxo_metadata_list = parse_utxo_list(utxo_list_str)
 
-                            # Fetch UTXO value from blockchain
-                            # Try get_utxo first (fastest), fallback to parsing raw transaction
-                            try:
-                                utxo_info = await self.backend.get_utxo(txid, vout_int)
+                    # Track if maker sent extended format
+                    has_extended = any(u.has_neutrino_metadata() for u in utxo_metadata_list)
+                    if has_extended:
+                        session.supports_v6 = True
+                        logger.debug(f"Maker {nick} sent extended UTXO format (v6)")
+
+                    for utxo_meta in utxo_metadata_list:
+                        txid = utxo_meta.txid
+                        vout = utxo_meta.vout
+
+                        # Verify UTXO and get value/address
+                        try:
+                            if (
+                                self.backend.requires_neutrino_metadata()
+                                and utxo_meta.has_neutrino_metadata()
+                            ):
+                                # Use Neutrino-compatible verification with metadata
+                                result = await self.backend.verify_utxo_with_metadata(
+                                    txid=txid,
+                                    vout=vout,
+                                    scriptpubkey=utxo_meta.scriptpubkey,  # type: ignore
+                                    blockheight=utxo_meta.blockheight,  # type: ignore
+                                )
+                                if result.valid:
+                                    value = result.value
+                                    address = ""  # Not available from verification
+                                    logger.debug(
+                                        f"Neutrino-verified UTXO {txid}:{vout} = {value} sats"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"Neutrino UTXO verification failed for "
+                                        f"{txid}:{vout}: {result.error}"
+                                    )
+                                    continue
+                            else:
+                                # Full node: direct UTXO lookup
+                                utxo_info = await self.backend.get_utxo(txid, vout)
                                 if utxo_info:
                                     value = utxo_info.value
                                     address = utxo_info.address
@@ -655,20 +699,17 @@ class Taker:
                                     # Fallback: get raw transaction and parse it
                                     tx_info = await self.backend.get_transaction(txid)
                                     if tx_info and tx_info.raw:
-                                        # Parse output value from raw tx hex
                                         from maker.tx_verification import parse_transaction
 
                                         parsed_tx = parse_transaction(
                                             tx_info.raw, network=self.config.network
                                         )
-                                        if parsed_tx and len(parsed_tx["outputs"]) > vout_int:
-                                            value = parsed_tx["outputs"][vout_int]["value"]
-                                            address = parsed_tx["outputs"][vout_int].get(
-                                                "address", ""
-                                            )
+                                        if parsed_tx and len(parsed_tx["outputs"]) > vout:
+                                            value = parsed_tx["outputs"][vout]["value"]
+                                            address = parsed_tx["outputs"][vout].get("address", "")
                                         else:
                                             logger.warning(
-                                                f"Could not parse output {vout_int} from tx {txid}"
+                                                f"Could not parse output {vout} from tx {txid}"
                                             )
                                             value = 0
                                             address = ""
@@ -676,22 +717,20 @@ class Taker:
                                         logger.warning(f"Could not fetch transaction {txid}")
                                         value = 0
                                         address = ""
-                            except Exception as e:
-                                logger.warning(f"Error fetching UTXO {txid}:{vout_int}: {e}")
-                                value = 0
-                                address = ""
+                        except Exception as e:
+                            logger.warning(f"Error verifying UTXO {txid}:{vout}: {e}")
+                            value = 0
+                            address = ""
 
-                            session.utxos.append(
-                                {
-                                    "txid": txid,
-                                    "vout": vout_int,
-                                    "value": value,
-                                    "address": address,
-                                }
-                            )
-                            logger.debug(
-                                f"Added UTXO from {nick}: {txid}:{vout_int} = {value} sats"
-                            )
+                        session.utxos.append(
+                            {
+                                "txid": txid,
+                                "vout": vout,
+                                "value": value,
+                                "address": address,
+                            }
+                        )
+                        logger.debug(f"Added UTXO from {nick}: {txid}:{vout} = {value} sats")
 
                     session.cj_address = cj_addr
                     session.change_address = change_addr
