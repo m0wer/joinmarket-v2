@@ -6,7 +6,7 @@ import json
 
 import pytest
 from jmcore.models import NetworkType
-from jmcore.protocol import JM_VERSION
+from jmcore.protocol import JM_VERSION, JM_VERSION_MIN
 
 from directory_server.handshake_handler import HandshakeError, HandshakeHandler
 
@@ -69,8 +69,64 @@ def test_handshake_wrong_protocol_version(handler):
         }
     )
 
-    with pytest.raises(HandshakeError, match="Protocol version mismatch"):
+    with pytest.raises(HandshakeError, match="Protocol version 999 not in supported range"):
         handler.process_handshake(handshake_data, "127.0.0.1:12345")
+
+
+def test_handshake_protocol_version_too_old(handler):
+    """Test that protocol versions below JM_VERSION_MIN are rejected."""
+    handshake_data = json.dumps(
+        {
+            "app-name": "joinmarket",
+            "directory": False,
+            "location-string": "test.onion:5222",
+            "proto-ver": JM_VERSION_MIN - 1,
+            "features": {},
+            "nick": "test",
+            "network": "mainnet",
+        }
+    )
+
+    with pytest.raises(HandshakeError, match="Protocol version .* not in supported range"):
+        handler.process_handshake(handshake_data, "127.0.0.1:12345")
+
+
+def test_handshake_protocol_version_min_accepted(handler):
+    """Test that the minimum supported protocol version is accepted."""
+    handshake_data = json.dumps(
+        {
+            "app-name": "joinmarket",
+            "directory": False,
+            "location-string": "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwx.onion:5222",
+            "proto-ver": JM_VERSION_MIN,
+            "features": {},
+            "nick": "test_client",
+            "network": "mainnet",
+        }
+    )
+
+    peer_info, response = handler.process_handshake(handshake_data, "127.0.0.1:12345")
+    assert peer_info.nick == "test_client"
+    assert response["accepted"] is True
+
+
+def test_handshake_protocol_version_max_accepted(handler):
+    """Test that the maximum supported protocol version is accepted."""
+    handshake_data = json.dumps(
+        {
+            "app-name": "joinmarket",
+            "directory": False,
+            "location-string": "abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwx.onion:5222",
+            "proto-ver": JM_VERSION,
+            "features": {},
+            "nick": "test_client",
+            "network": "mainnet",
+        }
+    )
+
+    peer_info, response = handler.process_handshake(handshake_data, "127.0.0.1:12345")
+    assert peer_info.nick == "test_client"
+    assert response["accepted"] is True
 
 
 def test_handshake_wrong_network(handler):
