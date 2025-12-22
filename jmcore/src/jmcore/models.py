@@ -11,6 +11,36 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+
+class MessageParsingError(Exception):
+    """Exception raised when message parsing fails due to security limits."""
+
+    pass
+
+
+def validate_json_nesting_depth(obj: Any, max_depth: int = 10, current_depth: int = 0) -> None:
+    """
+    Validate that a JSON object does not exceed maximum nesting depth.
+
+    Args:
+        obj: The object to validate (dict, list, or primitive)
+        max_depth: Maximum allowed nesting depth
+        current_depth: Current depth in recursion
+
+    Raises:
+        MessageParsingError: If nesting depth exceeds max_depth
+    """
+    if current_depth > max_depth:
+        raise MessageParsingError(f"JSON nesting depth exceeds maximum of {max_depth}")
+
+    if isinstance(obj, dict):
+        for value in obj.values():
+            validate_json_nesting_depth(value, max_depth, current_depth + 1)
+    elif isinstance(obj, list):
+        for item in obj:
+            validate_json_nesting_depth(item, max_depth, current_depth + 1)
+
+
 # Default directory servers for each network
 # Mainnet nodes verified as working (from https://joinmarketv2.sgn.space/orderbook.json)
 DIRECTORY_NODES_MAINNET: list[str] = [
@@ -109,10 +139,38 @@ class MessageEnvelope(BaseModel):
         return result
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> MessageEnvelope:
+    def from_bytes(
+        cls, data: bytes, max_line_length: int = 65536, max_json_nesting_depth: int = 10
+    ) -> MessageEnvelope:
+        """
+        Parse a message envelope from bytes with security limits.
+
+        Args:
+            data: Raw message bytes (without \\r\\n terminator)
+            max_line_length: Maximum allowed line length in bytes (default 64KB)
+            max_json_nesting_depth: Maximum JSON nesting depth (default 10)
+
+        Returns:
+            Parsed MessageEnvelope
+
+        Raises:
+            MessageParsingError: If message exceeds security limits
+            json.JSONDecodeError: If JSON is malformed
+        """
         import json
 
+        # Check line length BEFORE parsing to prevent DoS
+        if len(data) > max_line_length:
+            raise MessageParsingError(
+                f"Message line length {len(data)} exceeds maximum of {max_line_length} bytes"
+            )
+
+        # Parse JSON
         obj = json.loads(data)
+
+        # Validate nesting depth BEFORE creating model
+        validate_json_nesting_depth(obj, max_json_nesting_depth)
+
         return cls(message_type=obj["type"], payload=obj["line"])
 
 

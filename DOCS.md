@@ -1090,6 +1090,27 @@ The directory server enforces per-peer rate limits using a token bucket algorith
 | `message_burst_limit` | 200 | Maximum burst size |
 | `rate_limit_disconnect_threshold` | 50 | Violations before disconnect |
 | `max_message_size` | 2MB | Maximum message size |
+| `max_line_length` | 64KB | Maximum JSON-line message length |
+| `max_json_nesting_depth` | 10 | Maximum JSON nesting depth |
+
+#### JSON-Line Message Parsing Limits
+
+To prevent DoS attacks through malformed messages, the protocol enforces strict parsing limits:
+
+1. **Line Length Validation**: Checked **before** JSON parsing to prevent memory exhaustion
+   - Messages exceeding `max_line_length` (64KB default) are rejected immediately
+   - Prevents attackers from sending multi-megabyte JSON payloads
+
+2. **Nesting Depth Validation**: Enforced **after** parsing but before model creation
+   - JSON structures deeper than `max_json_nesting_depth` (10 levels default) are rejected
+   - Prevents stack overflow attacks via deeply nested objects/arrays
+
+3. **Pre-Parse Validation Flow**:
+   ```
+   Raw Message → Line Length Check → JSON Parse → Nesting Depth Check → Model Creation
+   ```
+
+These limits are applied in `MessageEnvelope.from_bytes()` and configured per directory server instance.
 
 #### Protocol Commands
 

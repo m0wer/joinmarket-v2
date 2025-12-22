@@ -8,9 +8,11 @@ from jmcore.models import (
     HandshakeRequest,
     HandshakeResponse,
     MessageEnvelope,
+    MessageParsingError,
     NetworkType,
     PeerInfo,
     PeerStatus,
+    validate_json_nesting_depth,
 )
 
 
@@ -83,3 +85,88 @@ def test_handshake_response():
     assert hs.app_name == "JoinMarket"
     assert hs.directory
     assert hs.accepted
+
+
+def test_message_envelope_line_length_limit():
+    """Test that messages exceeding max_line_length are rejected."""
+    # Create a message that's too long (default limit is 64KB)
+    long_payload = "x" * 70000
+    envelope = MessageEnvelope(message_type=793, payload=long_payload)
+    data = envelope.to_bytes()
+
+    # Should raise MessageParsingError with default limit (65536 bytes)
+    with pytest.raises(MessageParsingError, match="exceeds maximum"):
+        MessageEnvelope.from_bytes(data)
+
+    # Should succeed with higher limit
+    result = MessageEnvelope.from_bytes(data, max_line_length=100000)
+    assert result.payload == long_payload
+
+
+def test_message_envelope_nesting_depth_limit():
+    """Test that deeply nested JSON is rejected."""
+    import json
+
+    # Create deeply nested JSON (15 levels)
+    nested = {"a": {}}
+    current = nested["a"]
+    for _ in range(14):
+        current["b"] = {}
+        current = current["b"]
+
+    data = json.dumps({"type": 793, "line": "test", "nested": nested}).encode()
+
+    # Should raise MessageParsingError with default limit (10 levels)
+    with pytest.raises(MessageParsingError, match="nesting depth exceeds"):
+        MessageEnvelope.from_bytes(data)
+
+    # Should succeed with higher limit
+    result = MessageEnvelope.from_bytes(data, max_json_nesting_depth=20)
+    assert result.message_type == 793
+
+
+def test_validate_json_nesting_depth_dict():
+    """Test nesting depth validation for dictionaries."""
+    # Shallow structure (3 levels) - should pass
+    shallow = {"a": {"b": {"c": 1}}}
+    validate_json_nesting_depth(shallow, max_depth=5)
+
+    # Deep structure (6 levels) - should fail with max_depth=5
+    deep = {"a": {"b": {"c": {"d": {"e": {"f": 1}}}}}}
+    with pytest.raises(MessageParsingError):
+        validate_json_nesting_depth(deep, max_depth=5)
+
+
+def test_validate_json_nesting_depth_list():
+    """Test nesting depth validation for lists."""
+    # Shallow structure (3 levels) - should pass
+    shallow = [[[1, 2, 3]]]
+    validate_json_nesting_depth(shallow, max_depth=5)
+
+    # Deep structure (6 levels) - should fail with max_depth=5
+    deep = [[[[[[1]]]]]]
+    with pytest.raises(MessageParsingError):
+        validate_json_nesting_depth(deep, max_depth=5)
+
+
+def test_validate_json_nesting_depth_mixed():
+    """Test nesting depth validation for mixed dict/list structures."""
+    # Mixed structure (5 levels)
+    mixed = {"a": [{"b": [{"c": 1}]}]}
+
+    # Should pass with max_depth=5
+    validate_json_nesting_depth(mixed, max_depth=5)
+
+    # Should fail with max_depth=3
+    with pytest.raises(MessageParsingError):
+        validate_json_nesting_depth(mixed, max_depth=3)
+
+
+def test_message_envelope_parsing_order():
+    """Test that line length is checked before JSON parsing."""
+    # Create invalid JSON that's too long
+    long_invalid_json = b'{"type": 793, "invalid' + b"x" * 70000
+
+    # Should raise MessageParsingError (line length), not JSONDecodeError
+    with pytest.raises(MessageParsingError, match="line length"):
+        MessageEnvelope.from_bytes(long_invalid_json)
