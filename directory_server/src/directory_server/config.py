@@ -18,6 +18,8 @@ class Settings(BaseSettings):
 
     max_peers: int = 10000
     max_message_size: int = 2097152  # 2MB
+    max_line_length: int = 65536  # 64KB - maximum JSON-line message length
+    max_json_nesting_depth: int = 10  # Maximum nesting depth for JSON parsing
     message_rate_limit: int = 100  # messages per second (sustained)
     message_burst_limit: int = 200  # maximum burst size
     rate_limit_disconnect_threshold: int = 50  # disconnect after N violations

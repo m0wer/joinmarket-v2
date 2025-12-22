@@ -118,7 +118,11 @@ class DirectoryServer:
     async def _perform_handshake(self, connection: TCPConnection, conn_id: str) -> str | None:
         try:
             data = await asyncio.wait_for(connection.receive(), timeout=30.0)
-            envelope = MessageEnvelope.from_bytes(data)
+            envelope = MessageEnvelope.from_bytes(
+                data,
+                max_line_length=self.settings.max_line_length,
+                max_json_nesting_depth=self.settings.max_json_nesting_depth,
+            )
 
             if envelope.message_type != MessageType.HANDSHAKE:
                 logger.warning(f"Expected handshake, got {envelope.message_type}")
@@ -186,7 +190,11 @@ class DirectoryServer:
                     logger.debug(f"Rate limiting {peer_info.nick}: {violations} violations")
                     continue  # Drop message but stay connected
 
-                envelope = MessageEnvelope.from_bytes(data)
+                envelope = MessageEnvelope.from_bytes(
+                    data,
+                    max_line_length=self.settings.max_line_length,
+                    max_json_nesting_depth=self.settings.max_json_nesting_depth,
+                )
 
                 await self.message_router.route_message(envelope, peer_key)
 
