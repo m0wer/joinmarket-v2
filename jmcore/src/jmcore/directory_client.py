@@ -351,14 +351,24 @@ class DirectoryClient:
         """
         Listen for messages for a specified duration.
 
+        This method collects all messages received within the specified duration.
+        It properly handles connection closed errors by raising DirectoryClientError.
+
         Args:
             duration: How long to listen in seconds
 
         Returns:
             List of received messages
+
+        Raises:
+            DirectoryClientError: If not connected or connection is lost
         """
         if not self.connection:
             raise DirectoryClientError("Not connected")
+
+        # Check connection state before starting
+        if not self.connection.is_connected():
+            raise DirectoryClientError("Connection closed")
 
         messages: list[dict[str, Any]] = []
         start_time = asyncio.get_event_loop().time()
@@ -373,20 +383,25 @@ class DirectoryClient:
                     self.connection.receive(), timeout=remaining_time
                 )
                 response = json.loads(response_data.decode("utf-8"))
-                logger.debug(
+                logger.trace(
                     f"Received message type {response.get('type')}: "
                     f"{response.get('line', '')[:80]}..."
                 )
                 messages.append(response)
 
             except TimeoutError:
-                logger.debug("Timeout waiting for more messages")
+                # Normal timeout - no more messages within duration
                 break
             except Exception as e:
-                logger.debug(f"Error receiving message: {e}")
-                break
+                # Connection errors should propagate up so caller can reconnect
+                error_msg = str(e).lower()
+                if "connection" in error_msg and ("closed" in error_msg or "lost" in error_msg):
+                    raise DirectoryClientError(f"Connection lost: {e}") from e
+                # Other errors (JSON parse, etc) - log and continue
+                logger.warning(f"Error processing message: {e}")
+                continue
 
-        logger.debug(f"Collected {len(messages)} messages in {duration}s")
+        logger.trace(f"Collected {len(messages)} messages in {duration}s")
         return messages
 
     async def fetch_orderbooks(self) -> tuple[list[Offer], list[FidelityBond]]:

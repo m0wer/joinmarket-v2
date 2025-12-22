@@ -15,7 +15,7 @@ import json
 from typing import Any
 
 from jmcore.crypto import NickIdentity
-from jmcore.directory_client import DirectoryClient
+from jmcore.directory_client import DirectoryClient, DirectoryClientError
 from jmcore.models import Offer
 from jmcore.network import HiddenServiceListener, TCPConnection
 from jmcore.protocol import COMMAND_PREFIX, JM_VERSION
@@ -352,6 +352,10 @@ class MakerBot:
 
             except asyncio.CancelledError:
                 logger.info(f"Listener for {node_id} cancelled")
+                break
+            except DirectoryClientError as e:
+                # Connection lost - exit listener, let reconnection logic handle it
+                logger.warning(f"Connection lost on {node_id}: {e}")
                 break
             except Exception as e:
                 logger.error(f"Error listening on {node_id}: {e}")
