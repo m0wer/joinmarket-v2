@@ -48,7 +48,7 @@ __all__ = [
 @dataclass
 class ExtendedPoDLECommitment:
     """
-    PoDLE commitment with extended UTXO metadata for v6 protocol.
+    PoDLE commitment with extended UTXO metadata for neutrino_compat feature.
 
     This extends the base PoDLECommitment with scriptpubkey and blockheight
     for Neutrino-compatible UTXO verification.
@@ -203,7 +203,7 @@ def generate_podle_for_coinjoin(
         index=index,
     )
 
-    # Return extended commitment with UTXO metadata for v6 protocol
+    # Return extended commitment with UTXO metadata for neutrino_compat feature
     return ExtendedPoDLECommitment(
         commitment=commitment,
         scriptpubkey=utxo.scriptpubkey,

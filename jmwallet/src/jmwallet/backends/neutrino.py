@@ -9,10 +9,11 @@ This backend wraps the neutrino gRPC API for the JoinMarket wallet.
 
 Reference: https://github.com/lightninglabs/neutrino
 
-Protocol v6 Support:
+Neutrino-compatible Protocol Support:
 This backend implements verify_utxo_with_metadata() for Neutrino-compatible
 UTXO verification. When peers provide scriptPubKey and blockheight hints
-(protocol v6), this backend can verify UTXOs without arbitrary queries by:
+(via neutrino_compat feature flag), this backend can verify UTXOs without
+arbitrary queries by:
 1. Adding the scriptPubKey to the watch list
 2. Rescanning from the hinted blockheight
 3. Downloading matching blocks via compact block filters
@@ -485,7 +486,7 @@ class NeutrinoBackend(BlockchainBackend):
         blockheight: int,
     ) -> UTXOVerificationResult:
         """
-        Verify a UTXO using provided metadata (protocol v6 Neutrino-compatible).
+        Verify a UTXO using provided metadata (neutrino_compat feature).
 
         This is the key method that enables Neutrino light clients to verify
         counterparty UTXOs in CoinJoin without arbitrary blockchain queries.

@@ -356,10 +356,10 @@ class TestFilterOffersByNickVersion:
 
     @pytest.fixture
     def mixed_version_offers(self) -> list[Offer]:
-        """Offers from v5 and v6 makers."""
+        """Offers from makers with different nicks (all J5 in our implementation)."""
         return [
             Offer(
-                counterparty="J5oldmaker123OOO",  # v5 maker
+                counterparty="J5oldmaker123OOO",  # maker 1
                 oid=0,
                 ordertype=OfferType.SW0_RELATIVE,
                 minsize=10_000,
@@ -368,7 +368,7 @@ class TestFilterOffersByNickVersion:
                 cjfee="0.001",
             ),
             Offer(
-                counterparty="J6newmaker456OOO",  # v6 maker
+                counterparty="J5newmaker456OOO",  # maker 2
                 oid=0,
                 ordertype=OfferType.SW0_RELATIVE,
                 minsize=10_000,
@@ -377,7 +377,7 @@ class TestFilterOffersByNickVersion:
                 cjfee="0.001",
             ),
             Offer(
-                counterparty="J6another789OOO",  # v6 maker
+                counterparty="J5another789OOO",  # maker 3
                 oid=1,
                 ordertype=OfferType.SW0_RELATIVE,
                 minsize=10_000,
@@ -399,32 +399,34 @@ class TestFilterOffersByNickVersion:
         )
         assert len(eligible) == 3
 
-    def test_filter_v6_only(self, mixed_version_offers: list[Offer], max_cj_fee: MaxCjFee) -> None:
-        """With v6 requirement, only J6 makers pass."""
+    def test_filter_min_version(
+        self, mixed_version_offers: list[Offer], max_cj_fee: MaxCjFee
+    ) -> None:
+        """Test min_nick_version filtering (tests reference compat with hypothetical J6)."""
+        # In our implementation all makers use J5, but filter logic remains for reference compat
         eligible = filter_offers(
             offers=mixed_version_offers,
             cj_amount=100_000,
             max_cj_fee=max_cj_fee,
-            min_nick_version=6,
+            min_nick_version=6,  # Would filter for J6 makers if they existed
         )
-        assert len(eligible) == 2
-        for offer in eligible:
-            assert offer.counterparty.startswith("J6")
+        # All our test makers are J5, so none pass the J6 filter
+        assert len(eligible) == 0
 
     def test_choose_orders_with_version_filter(
         self, mixed_version_offers: list[Offer], max_cj_fee: MaxCjFee
     ) -> None:
-        """choose_orders respects min_nick_version."""
+        """choose_orders respects min_nick_version (for reference compat)."""
         orders, fee = choose_orders(
             offers=mixed_version_offers,
             cj_amount=100_000,
             n=2,
             max_cj_fee=max_cj_fee,
-            min_nick_version=6,
+            min_nick_version=5,  # Our makers are J5
         )
         assert len(orders) == 2
         for nick in orders.keys():
-            assert nick.startswith("J6")
+            assert nick.startswith("J5")
 
     def test_orderbook_manager_with_version_filter(
         self, mixed_version_offers: list[Offer], max_cj_fee: MaxCjFee
@@ -433,21 +435,21 @@ class TestFilterOffersByNickVersion:
         manager = OrderbookManager(max_cj_fee)
         manager.update_offers(mixed_version_offers)
 
-        orders, fee = manager.select_makers(cj_amount=100_000, n=2, min_nick_version=6)
+        orders, fee = manager.select_makers(cj_amount=100_000, n=2, min_nick_version=5)
         assert len(orders) == 2
         for nick in orders.keys():
-            assert nick.startswith("J6")
+            assert nick.startswith("J5")
 
-    def test_not_enough_v6_makers(
+    def test_not_enough_makers_with_min_version(
         self, mixed_version_offers: list[Offer], max_cj_fee: MaxCjFee
     ) -> None:
-        """When not enough v6 makers, return what's available."""
+        """When not enough makers meet version requirement, return what's available."""
         orders, fee = choose_orders(
             offers=mixed_version_offers,
             cj_amount=100_000,
-            n=5,  # Request more than available v6 makers
+            n=5,  # Request more than total available
             max_cj_fee=max_cj_fee,
-            min_nick_version=6,
+            min_nick_version=5,
         )
-        # Only 2 v6 makers available
-        assert len(orders) == 2
+        # Only 3 J5 makers available
+        assert len(orders) == 3

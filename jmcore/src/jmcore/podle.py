@@ -332,7 +332,7 @@ def parse_podle_revelation(revelation: dict[str, Any]) -> dict[str, Any] | None:
     }
 
     Returns parsed structure with bytes, or None if invalid.
-    Extended format includes scriptpubkey and blockheight for v6 protocol.
+    Extended format includes scriptpubkey and blockheight for neutrino_compat feature.
     """
     try:
         required_fields = ["P", "P2", "sig", "e", "utxo"]

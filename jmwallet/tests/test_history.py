@@ -206,7 +206,7 @@ class TestHelperFunctions:
     def test_create_maker_history_entry(self) -> None:
         """Test create_maker_history_entry helper."""
         entry = create_maker_history_entry(
-            taker_nick="J6testuser123456",
+            taker_nick="J5testuser123456",
             cj_amount=1_000_000,
             fee_received=250,
             txfee_contribution=50,
@@ -221,7 +221,7 @@ class TestHelperFunctions:
         assert entry.fee_received == 250
         assert entry.txfee_contribution == 50
         assert entry.net_fee == 200  # 250 - 50
-        assert entry.counterparty_nicks == "J6testuser123456"
+        assert entry.counterparty_nicks == "J5testuser123456"
         assert entry.peer_count == 1
         assert "abc123:0" in entry.utxos_used
         assert entry.network == "regtest"
@@ -229,7 +229,7 @@ class TestHelperFunctions:
     def test_create_taker_history_entry(self) -> None:
         """Test create_taker_history_entry helper."""
         entry = create_taker_history_entry(
-            maker_nicks=["J6maker1", "J6maker2", "J6maker3"],
+            maker_nicks=["J5maker1", "J5maker2", "J5maker3"],
             cj_amount=2_000_000,
             total_maker_fees=900,
             mining_fee=300,
@@ -247,7 +247,7 @@ class TestHelperFunctions:
         assert entry.mining_fee_paid == 300
         assert entry.net_fee == -1200  # -(900 + 300)
         assert entry.peer_count == 3
-        assert "J6maker1" in entry.counterparty_nicks
+        assert "J5maker1" in entry.counterparty_nicks
         assert entry.destination_address == "bc1qdest..."
         assert entry.source_mixdepth == 0
         assert entry.broadcast_method == "self"
@@ -255,7 +255,7 @@ class TestHelperFunctions:
     def test_create_taker_history_entry_failed(self) -> None:
         """Test create_taker_history_entry for failed CoinJoin."""
         entry = create_taker_history_entry(
-            maker_nicks=["J6maker1"],
+            maker_nicks=["J5maker1"],
             cj_amount=500_000,
             total_maker_fees=0,
             mining_fee=0,

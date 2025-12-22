@@ -197,23 +197,13 @@ def get_nick_version(nick: str) -> int:
     Extract protocol version from a JoinMarket nick.
 
     Nick format: J{version}{hash} where version is a single digit.
-    Examples: J5abc123... (v5), J6xyz789... (v6)
+    Example: J5abc123... (v5)
 
     Returns JM_VERSION (5) if version cannot be determined.
     """
     if nick and len(nick) >= 2 and nick[0] == "J" and nick[1].isdigit():
         return int(nick[1])
     return JM_VERSION
-
-
-def is_v6_nick(nick: str) -> bool:
-    """
-    Check if a nick indicates protocol version 6 or higher.
-
-    DEPRECATED: Use feature-based detection instead.
-    This function is kept for backward compatibility during transition.
-    """
-    return get_nick_version(nick) >= 6
 
 
 @dataclass

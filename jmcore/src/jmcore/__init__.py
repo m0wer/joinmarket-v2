@@ -37,7 +37,6 @@ from jmcore.protocol import (
     UTXOMetadata,
     format_utxo_list,
     get_nick_version,
-    is_v6_nick,
     parse_utxo_list,
     peer_supports_neutrino_compat,
 )
@@ -68,7 +67,6 @@ __all__ = [
     "generate_podle",
     "get_default_directory_nodes",
     "get_nick_version",
-    "is_v6_nick",
     "parse_podle_revelation",
     "parse_utxo_list",
     "peer_supports_neutrino_compat",

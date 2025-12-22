@@ -6,7 +6,7 @@ Available backends:
 - NeutrinoBackend: Lightweight BIP157/BIP158 SPV client
 - MempoolBackend: Mempool.space API (third-party, no setup required)
 
-Protocol v6 Support:
+Neutrino Compatibility:
 All backends support verify_utxo_with_metadata() for Neutrino-compatible
 UTXO verification. Check backend.requires_neutrino_metadata() to determine
 if the backend needs scriptPubKey/blockheight hints from peers.

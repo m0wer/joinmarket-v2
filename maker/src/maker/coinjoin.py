@@ -21,7 +21,6 @@ from jmcore.models import NetworkType, Offer
 from jmcore.protocol import (
     UTXOMetadata,
     format_utxo_list,
-    get_nick_version,
 )
 from jmwallet.backends.base import BlockchainBackend
 from jmwallet.wallet.models import UTXOInfo
@@ -90,11 +89,9 @@ class CoinJoinSession:
         self.session_timeout_sec = session_timeout_sec
 
         # Feature detection for extended UTXO format (neutrino_compat)
-        # Currently using nick-based detection as fallback:
-        # - J6+ nicks are assumed to support extended format
-        # - J5 nicks use legacy format (reference implementation compatibility)
-        # TODO: Future work - negotiate features during !fill/!pubkey exchange
-        self.peer_neutrino_compat = get_nick_version(taker_nick) >= 6
+        # Initially, we use extended format if our own backend requires it (neutrino)
+        # This will be updated to True if taker sends extended format during !auth
+        self.peer_neutrino_compat = backend.requires_neutrino_metadata()
 
         # E2E encryption session with taker
         self.crypto = CryptoSession()
@@ -212,14 +209,17 @@ class CoinJoinSession:
             utxo_txid = parsed_rev["txid"]
             utxo_vout = parsed_rev["vout"]
 
-            # Check for extended UTXO metadata (protocol v6)
+            # Check for extended UTXO metadata (neutrino_compat feature)
             # The revelation may include scriptpubkey and blockheight
             taker_scriptpubkey = parsed_rev.get("scriptpubkey")
             taker_blockheight = parsed_rev.get("blockheight")
 
-            # Log if taker sent extended format (useful for debugging)
-            if taker_scriptpubkey and taker_blockheight is not None:
-                logger.debug("Taker sent extended UTXO format (v6)")
+            # Track if taker sent extended format - we'll respond in kind
+            taker_sent_extended = taker_scriptpubkey is not None and taker_blockheight is not None
+            if taker_sent_extended:
+                logger.debug("Taker sent extended UTXO format (neutrino_compat)")
+                # Update our peer detection - taker supports neutrino_compat
+                self.peer_neutrino_compat = True
 
             # Verify the taker's UTXO exists on the blockchain
             # Use Neutrino-compatible verification if backend requires it and metadata available
@@ -275,8 +275,8 @@ class CoinJoinSession:
             self.change_address = change_addr
             self.mixdepth = mixdepth
 
-            # Format UTXOs: extended format (v6) includes scriptpubkey:blockheight
-            # Legacy format (v5) is just txid:vout
+            # Format UTXOs: extended format (neutrino_compat) includes scriptpubkey:blockheight
+            # Legacy format is just txid:vout
             utxo_metadata_list = [
                 UTXOMetadata(
                     txid=txid,

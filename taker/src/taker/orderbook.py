@@ -100,7 +100,7 @@ def filter_offers(
             logger.debug(f"Ignoring offer from {offer.counterparty} (in ignored list)")
             continue
 
-        # Filter by nick version (for neutrino takers that need v6 makers)
+        # Filter by nick version (if required - e.g., for specific compatibility needs)
         if min_nick_version is not None:
             nick_version = get_nick_version(offer.counterparty)
             if nick_version < min_nick_version:

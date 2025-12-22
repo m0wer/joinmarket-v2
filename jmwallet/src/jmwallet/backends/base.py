@@ -33,7 +33,7 @@ class UTXOVerificationResult:
     """
     Result of UTXO verification with metadata.
 
-    Used by protocol v6 Neutrino-compatible verification.
+    Used by neutrino_compat feature for Neutrino-compatible verification.
     """
 
     valid: bool
@@ -95,7 +95,7 @@ class BlockchainBackend(ABC):
         blockheight: int,
     ) -> UTXOVerificationResult:
         """
-        Verify a UTXO using provided metadata (protocol v6 Neutrino-compatible).
+        Verify a UTXO using provided metadata (neutrino_compat feature).
 
         This method allows light clients to verify UTXOs without needing
         arbitrary blockchain queries by using metadata provided by the peer.

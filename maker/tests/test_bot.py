@@ -420,7 +420,7 @@ class TestHandlePush:
         tx_bytes = bytes.fromhex("0100000000010000000000")
         tx_b64 = base64.b64encode(tx_bytes).decode("ascii")
 
-        await maker_bot._handle_push("J6taker123", f"push {tx_b64}")
+        await maker_bot._handle_push("J5taker123", f"push {tx_b64}")
 
         # Verify broadcast was called with the decoded transaction
         maker_bot.backend.broadcast_transaction.assert_called_once_with(tx_bytes.hex())
@@ -429,7 +429,7 @@ class TestHandlePush:
     async def test_handle_push_invalid_format(self, maker_bot):
         """Test that invalid !push format is handled gracefully."""
         # Missing transaction data
-        await maker_bot._handle_push("J6taker123", "push")
+        await maker_bot._handle_push("J5taker123", "push")
 
         # Should not call broadcast
         maker_bot.backend.broadcast_transaction.assert_not_called()
@@ -437,7 +437,7 @@ class TestHandlePush:
     @pytest.mark.asyncio
     async def test_handle_push_invalid_base64(self, maker_bot):
         """Test that invalid base64 is handled gracefully."""
-        await maker_bot._handle_push("J6taker123", "push not_valid_base64!!!")
+        await maker_bot._handle_push("J5taker123", "push not_valid_base64!!!")
 
         # Should not call broadcast (decoding fails)
         maker_bot.backend.broadcast_transaction.assert_not_called()
@@ -455,7 +455,7 @@ class TestHandlePush:
         tx_b64 = base64.b64encode(tx_bytes).decode("ascii")
 
         # Should not raise
-        await maker_bot._handle_push("J6taker123", f"push {tx_b64}")
+        await maker_bot._handle_push("J5taker123", f"push {tx_b64}")
 
         # Broadcast was attempted
         maker_bot.backend.broadcast_transaction.assert_called_once()
@@ -471,7 +471,7 @@ class TestHandlePush:
         async def mock_handle_push(taker_nick: str, msg: str) -> None:
             nonlocal push_called
             push_called = True
-            assert taker_nick == "J6taker123"
+            assert taker_nick == "J5taker123"
             assert "push" in msg
 
         maker_bot._handle_push = mock_handle_push
@@ -479,7 +479,7 @@ class TestHandlePush:
         # Simulate a privmsg with !push
         tx_bytes = bytes.fromhex("0100000000010000000000")
         tx_b64 = base64.b64encode(tx_bytes).decode("ascii")
-        line = f"J6taker123!{maker_bot.nick}!!push {tx_b64}"
+        line = f"J5taker123!{maker_bot.nick}!!push {tx_b64}"
 
         await maker_bot._handle_privmsg(line)
 

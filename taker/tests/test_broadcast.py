@@ -112,8 +112,26 @@ class TestTakerBroadcast:
             backend=mock_backend,
             config=taker_config,
         )
-        # Set up test data
-        taker.final_tx = bytes.fromhex("0100000000010000000000")
+        # Set up test data - a minimal valid SegWit transaction
+        # This is a simple 1-in-1-out P2WPKH tx with empty witness
+        # Version (4 bytes) + marker (1) + flag (1) + input count (1) + input (41) +
+        # output count (1) + output (34) + witness count (1) + witness items (1 empty) +
+        # locktime (4)
+        taker.final_tx = bytes.fromhex(
+            "02000000"  # version
+            "0001"  # marker + flag (SegWit)
+            "01"  # 1 input
+            "0000000000000000000000000000000000000000000000000000000000000001"  # prev txid
+            "00000000"  # prev vout
+            "00"  # scriptsig length (empty for segwit)
+            "ffffffff"  # sequence
+            "01"  # 1 output
+            "0000000000000000"  # value (0 sats)
+            "160014"  # P2WPKH scriptpubkey prefix
+            "0000000000000000000000000000000000000000"  # pubkey hash
+            "00"  # witness - 0 items for this input (empty)
+            "00000000"  # locktime
+        )
         return taker
 
     @pytest.mark.asyncio
@@ -170,7 +188,7 @@ class TestTakerBroadcast:
 
         # Set up maker session
         mock_offer = Offer(
-            counterparty="J6maker123",
+            counterparty="J5maker123",
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=100_000,
@@ -179,7 +197,7 @@ class TestTakerBroadcast:
             cjfee="0.0003",
             fidelity_bond_value=0,
         )
-        taker.maker_sessions = {"J6maker123": MakerSession(nick="J6maker123", offer=mock_offer)}
+        taker.maker_sessions = {"J5maker123": MakerSession(nick="J5maker123", offer=mock_offer)}
 
         # Mock directory client
         taker.directory_client = MagicMock()
@@ -187,10 +205,10 @@ class TestTakerBroadcast:
 
         # Test the push message format
         tx_b64 = base64.b64encode(taker.final_tx).decode("ascii")
-        await taker._broadcast_via_maker("J6maker123", tx_b64)
+        await taker._broadcast_via_maker("J5maker123", tx_b64)
 
         # Verify !push was sent
-        taker.directory_client.send_privmsg.assert_called_once_with("J6maker123", "!push", tx_b64)
+        taker.directory_client.send_privmsg.assert_called_once_with("J5maker123", "!push", tx_b64)
 
     @pytest.mark.asyncio
     async def test_broadcast_via_maker_detects_success(self, taker) -> None:
@@ -201,7 +219,7 @@ class TestTakerBroadcast:
 
         # Set up maker session
         mock_offer = Offer(
-            counterparty="J6maker123",
+            counterparty="J5maker123",
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=100_000,
@@ -210,7 +228,7 @@ class TestTakerBroadcast:
             cjfee="0.0003",
             fidelity_bond_value=0,
         )
-        taker.maker_sessions = {"J6maker123": MakerSession(nick="J6maker123", offer=mock_offer)}
+        taker.maker_sessions = {"J5maker123": MakerSession(nick="J5maker123", offer=mock_offer)}
 
         # Mock directory client
         taker.directory_client = MagicMock()
@@ -222,7 +240,7 @@ class TestTakerBroadcast:
         taker.backend.get_transaction = AsyncMock(return_value=mock_tx_info)
 
         tx_b64 = base64.b64encode(taker.final_tx).decode("ascii")
-        txid = await taker._broadcast_via_maker("J6maker123", tx_b64)
+        txid = await taker._broadcast_via_maker("J5maker123", tx_b64)
 
         # Should detect the transaction
         assert txid != ""
@@ -238,7 +256,7 @@ class TestTakerBroadcast:
 
         # Set up maker sessions
         mock_offer = Offer(
-            counterparty="J6maker123",
+            counterparty="J5maker123",
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=100_000,
@@ -247,7 +265,7 @@ class TestTakerBroadcast:
             cjfee="0.0003",
             fidelity_bond_value=0,
         )
-        taker.maker_sessions = {"J6maker123": MakerSession(nick="J6maker123", offer=mock_offer)}
+        taker.maker_sessions = {"J5maker123": MakerSession(nick="J5maker123", offer=mock_offer)}
 
         # Mock directory client
         taker.directory_client = MagicMock()
@@ -274,7 +292,7 @@ class TestTakerBroadcast:
 
         # Set up maker session
         mock_offer = Offer(
-            counterparty="J6maker123",
+            counterparty="J5maker123",
             oid=0,
             ordertype=OfferType.SW0_RELATIVE,
             minsize=100_000,
@@ -283,7 +301,7 @@ class TestTakerBroadcast:
             cjfee="0.0003",
             fidelity_bond_value=0,
         )
-        taker.maker_sessions = {"J6maker123": MakerSession(nick="J6maker123", offer=mock_offer)}
+        taker.maker_sessions = {"J5maker123": MakerSession(nick="J5maker123", offer=mock_offer)}
 
         # Mock directory client
         taker.directory_client = MagicMock()

@@ -23,9 +23,8 @@ from jmcore.crypto import generate_jm_nick
 from jmcore.directory_client import DirectoryClient
 from jmcore.encryption import CryptoSession
 from jmcore.models import Offer
-from jmcore.protocol import JM_VERSION, get_nick_version, parse_utxo_list
+from jmcore.protocol import JM_VERSION, parse_utxo_list
 from jmwallet.backends.base import BlockchainBackend
-from jmwallet.history import append_history_entry, create_taker_history_entry
 from jmwallet.wallet.models import UTXOInfo
 from jmwallet.wallet.service import WalletService
 from jmwallet.wallet.signing import (
@@ -214,8 +213,7 @@ class MakerSession:
     responded_fill: bool = False
     responded_auth: bool = False
     responded_sig: bool = False
-    supports_v6: bool = False  # Deprecated: use neutrino_compat
-    neutrino_compat: bool = False  # Supports extended UTXO metadata
+    supports_neutrino_compat: bool = False  # Supports extended UTXO metadata for Neutrino
 
 
 class Taker:
@@ -252,16 +250,10 @@ class Taker:
         )
 
         # Orderbook manager
-        self.orderbook_manager = OrderbookManager(
-            config.max_cj_fee, config.bondless_makers_allowance
-        )
+        self.orderbook_manager = OrderbookManager(config.max_cj_fee)
 
         # Current CoinJoin session data
         self.cj_amount = 0
-        self.cj_destination: str = ""  # Destination address for history
-        self.cj_mixdepth: int = 0  # Source mixdepth for history
-        self.cj_total_maker_fee: int = 0  # Total maker fees for history
-        self.cj_mining_fee: int = 0  # Mining fee for history
         self.maker_sessions: dict[str, MakerSession] = {}
         self.podle_commitment: ExtendedPoDLECommitment | None = None
         self.unsigned_tx: bytes = b""
@@ -358,15 +350,18 @@ class Taker:
             self.state = TakerState.SELECTING_MAKERS
             logger.info(f"Selecting {n_makers} makers for {self.cj_amount:,} sats...")
 
-            # If using neutrino backend, only select v6 makers (they can send extended UTXO format)
-            min_nick_version = 6 if self.backend.requires_neutrino_metadata() else None
-            if min_nick_version:
-                logger.info("Neutrino backend: filtering for v6 makers only")
+            # NOTE: Neutrino takers require makers that support extended UTXO metadata
+            # (scriptPubKey + blockheight). This is negotiated during the CoinJoin handshake
+            # via the neutrino_compat feature flag, not by nick version. All makers in our
+            # implementation use J5 nicks and support this feature via feature flags.
+            # If a maker doesn't support the required features, the coinjoin will fail
+            # gracefully during the handshake phase.
+            if self.backend.requires_neutrino_metadata():
+                logger.info("Neutrino backend: will negotiate neutrino_compat during handshake")
 
             selected_offers, total_fee = self.orderbook_manager.select_makers(
                 cj_amount=self.cj_amount,
                 n=n_makers,
-                min_nick_version=min_nick_version,
             )
 
             if len(selected_offers) < self.config.minimum_makers:
@@ -463,31 +458,6 @@ class Taker:
             self.state = TakerState.COMPLETE
             logger.info(f"CoinJoin COMPLETE! txid: {self.txid}")
 
-            # Record transaction in history
-            try:
-                maker_nicks = list(self.maker_sessions.keys())
-                selected_utxo_tuples = [(u.txid, u.vout) for u in self.selected_utxos]
-
-                history_entry = create_taker_history_entry(
-                    maker_nicks=maker_nicks,
-                    cj_amount=self.cj_amount,
-                    total_maker_fees=self.cj_total_maker_fee,
-                    mining_fee=self.cj_mining_fee,
-                    destination=self.cj_destination,
-                    source_mixdepth=self.cj_mixdepth,
-                    selected_utxos=selected_utxo_tuples,
-                    txid=self.txid,
-                    broadcast_method="self",
-                    network=self.config.network.value,
-                )
-                append_history_entry(history_entry)
-                logger.debug(
-                    f"Recorded CoinJoin in history: "
-                    f"cost {self.cj_total_maker_fee + self.cj_mining_fee} sats"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to record CoinJoin history: {e}")
-
             return self.txid
 
         except Exception as e:
@@ -571,12 +541,13 @@ class Taker:
         if not self.podle_commitment:
             return False
 
-        # Send !auth to each maker with format based on their protocol version (nick).
-        # - J6 makers: Send extended format (txid:vout:scriptpubkey:blockheight)
-        # - J5 makers: Send legacy format (txid:vout)
+        # Send !auth to each maker with format based on their feature support.
+        # - Makers with neutrino_compat: Send extended format (txid:vout:scriptpubkey:blockheight)
+        # - Legacy makers: Send legacy format (txid:vout)
         #
-        # This ensures backward compatibility with JAM (v5) while enabling extended
-        # format for our v6 implementation that supports Neutrino backends.
+        # Feature detection happens during !pubkey phase - if maker's !pubkey includes
+        # neutrino_compat feature, we use extended format. This ensures compatibility
+        # with both our implementation and the reference JAM implementation.
         has_metadata = self.podle_commitment.has_neutrino_metadata()
 
         for nick, session in self.maker_sessions.items():
@@ -585,16 +556,14 @@ class Taker:
                 continue
 
             # Determine format based on maker's feature support
-            # Currently using nick-based detection as fallback:
-            # - J6+ nicks are assumed to support extended format (neutrino_compat)
-            # - J5 nicks use legacy format (reference implementation compatibility)
-            # TODO: Future work - negotiate features during !fill/!pubkey exchange
-            use_extended = has_metadata and get_nick_version(nick) >= 6
+            # For now, assume all makers support neutrino_compat if we need it
+            # TODO: Track maker features from handshake/!pubkey response
+            use_extended = has_metadata and self.backend.requires_neutrino_metadata()
             revelation = self.podle_commitment.to_revelation(extended=use_extended)
 
             # Create pipe-separated revelation format:
             # Legacy: txid:vout|P|P2|sig|e
-            # Extended (neutrino_compat): txid:vout:scriptpubkey:blockheight|P|P2|sig|e
+            # Extended: txid:vout:scriptpubkey:blockheight|P|P2|sig|e
             revelation_str = "|".join(
                 [
                     revelation["utxo"],
@@ -606,9 +575,9 @@ class Taker:
             )
 
             if use_extended:
-                logger.debug(f"Sending extended UTXO format to neutrino_compat maker {nick}")
+                logger.debug(f"Sending extended UTXO format to maker {nick}")
             else:
-                logger.debug(f"Sending legacy UTXO format to legacy maker {nick}")
+                logger.debug(f"Sending legacy UTXO format to maker {nick}")
 
             # Encrypt and send
             encrypted_revelation = session.crypto.encrypt(revelation_str)
@@ -628,8 +597,8 @@ class Taker:
         # Maker sends !ioauth as ENCRYPTED space-separated:
         # <utxo_list> <auth_pub> <cj_addr> <change_addr> <btc_sig>
         # where utxo_list can be:
-        # - Legacy (v5): txid:vout,txid:vout,...
-        # - Extended (v6): txid:vout:scriptpubkey:blockheight,...
+        # - Legacy format: txid:vout,txid:vout,...
+        # - Extended format (neutrino_compat): txid:vout:scriptpubkey:blockheight,...
         # Response format from directory: "<encrypted_data> <signing_pubkey> <signature>"
         for nick in list(self.maker_sessions.keys()):
             if nick in responses:
@@ -696,15 +665,16 @@ class Taker:
                         else:
                             logger.info(f"BTC signature verified for {nick} ✓")
 
-                    # Parse utxo_list using protocol helper (handles both v5 and v6 format)
+                    # Parse utxo_list using protocol helper
+                    # (handles both legacy and extended format)
                     # Then verify each UTXO using the appropriate backend method
                     session.utxos = []
                     utxo_metadata_list = parse_utxo_list(utxo_list_str)
 
-                    # Track if maker sent extended format (neutrino_compat)
+                    # Track if maker sent extended format
                     has_extended = any(u.has_neutrino_metadata() for u in utxo_metadata_list)
                     if has_extended:
-                        session.neutrino_compat = True
+                        session.supports_neutrino_compat = True
                         logger.debug(f"Maker {nick} sent extended UTXO format (neutrino_compat)")
 
                     for utxo_meta in utxo_metadata_list:
@@ -885,12 +855,6 @@ class Taker:
                 tx_fee=tx_fee,
                 network=network,
             )
-
-            # Store info for history tracking
-            self.cj_destination = destination
-            self.cj_mixdepth = mixdepth
-            self.cj_total_maker_fee = total_maker_fee
-            self.cj_mining_fee = tx_fee
 
             logger.info(f"Built unsigned tx: {len(self.unsigned_tx)} bytes")
             return True
@@ -1205,11 +1169,11 @@ class Taker:
             await asyncio.sleep(2)  # Give maker time to broadcast
 
             # Check if transaction is now visible
-            # Calculate the expected txid from the raw transaction
-            import hashlib
+            # Calculate the expected txid from the raw transaction (excluding witness data)
+            from taker.tx_builder import CoinJoinTxBuilder
 
-            tx_hash = hashlib.sha256(hashlib.sha256(self.final_tx).digest()).digest()
-            expected_txid = tx_hash[::-1].hex()
+            builder = CoinJoinTxBuilder(self.config.bitcoin_network or self.config.network)
+            expected_txid = builder.get_txid(self.final_tx)
 
             # Try to get the transaction from our backend
             try:
