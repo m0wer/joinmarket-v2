@@ -345,6 +345,7 @@ def choose_orders(
     choose_fn: Callable[[list[Offer], int], list[Offer]] | None = None,
     ignored_makers: set[str] | None = None,
     min_nick_version: int | None = None,
+    bondless_makers_allowance: float = 0.125,
 ) -> tuple[dict[str, Offer], int]:
     """
     Choose n orders from the orderbook for a CoinJoin.
@@ -357,12 +358,18 @@ def choose_orders(
         choose_fn: Selection algorithm (default: fidelity_bond_weighted_choose)
         ignored_makers: Makers to exclude
         min_nick_version: Minimum required nick version (e.g., 6 for neutrino takers)
+        bondless_makers_allowance: Probability of random selection vs fidelity bond weighting
 
     Returns:
         (dict of counterparty -> offer, total_cj_fee)
     """
     if choose_fn is None:
-        choose_fn = fidelity_bond_weighted_choose
+        # Use partial to bind bondless_makers_allowance
+        from functools import partial
+
+        choose_fn = partial(
+            fidelity_bond_weighted_choose, bondless_makers_allowance=bondless_makers_allowance
+        )
 
     # Filter offers
     eligible = filter_offers(
@@ -407,6 +414,7 @@ def choose_sweep_orders(
     choose_fn: Callable[[list[Offer], int], list[Offer]] | None = None,
     ignored_makers: set[str] | None = None,
     min_nick_version: int | None = None,
+    bondless_makers_allowance: float = 0.125,
 ) -> tuple[dict[str, Offer], int, int]:
     """
     Choose n orders for a sweep transaction (no change).
@@ -423,12 +431,17 @@ def choose_sweep_orders(
         choose_fn: Selection algorithm
         ignored_makers: Makers to exclude
         min_nick_version: Minimum required nick version (e.g., 6 for neutrino takers)
+        bondless_makers_allowance: Probability of random selection vs fidelity bond weighting
 
     Returns:
         (dict of counterparty -> offer, cj_amount, total_cj_fee)
     """
     if choose_fn is None:
-        choose_fn = fidelity_bond_weighted_choose
+        from functools import partial
+
+        choose_fn = partial(
+            fidelity_bond_weighted_choose, bondless_makers_allowance=bondless_makers_allowance
+        )
 
     if ignored_makers is None:
         ignored_makers = set()
@@ -496,8 +509,9 @@ def choose_sweep_orders(
 class OrderbookManager:
     """Manages orderbook state and maker selection."""
 
-    def __init__(self, max_cj_fee: MaxCjFee):
+    def __init__(self, max_cj_fee: MaxCjFee, bondless_makers_allowance: float = 0.125):
         self.max_cj_fee = max_cj_fee
+        self.bondless_makers_allowance = bondless_makers_allowance
         self.offers: list[Offer] = []
         self.bonds: dict[str, Any] = {}  # maker -> bond info
         self.ignored_makers: set[str] = set()
@@ -549,6 +563,7 @@ class OrderbookManager:
             max_cj_fee=self.max_cj_fee,
             ignored_makers=self.ignored_makers,
             min_nick_version=min_nick_version,
+            bondless_makers_allowance=self.bondless_makers_allowance,
         )
 
     def select_makers_for_sweep(
@@ -585,4 +600,5 @@ class OrderbookManager:
             max_cj_fee=self.max_cj_fee,
             ignored_makers=self.ignored_makers,
             min_nick_version=min_nick_version,
+            bondless_makers_allowance=self.bondless_makers_allowance,
         )

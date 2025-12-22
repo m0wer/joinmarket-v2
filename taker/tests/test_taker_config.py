@@ -16,7 +16,7 @@ class TestMaxCjFee:
     def test_default_values(self) -> None:
         """Test default fee values."""
         fee = MaxCjFee()
-        assert fee.abs_fee == 50_000
+        assert fee.abs_fee == 500
         assert fee.rel_fee == "0.001"
 
     def test_custom_values(self) -> None:

@@ -30,7 +30,7 @@ class BroadcastPolicy(str, Enum):
 class MaxCjFee(BaseModel):
     """Maximum CoinJoin fee limits."""
 
-    abs_fee: int = Field(default=50_000, ge=0, description="Maximum absolute fee in sats")
+    abs_fee: int = Field(default=500, ge=0, description="Maximum absolute fee in sats")
     rel_fee: str = Field(default="0.001", description="Maximum relative fee (0.001 = 0.1%)")
 
 
@@ -45,7 +45,7 @@ class TakerConfig(BaseModel):
     # Bitcoin network - used for address generation (bcrt1 vs tb1 vs bc1)
     # If not specified, defaults to the same as network
     bitcoin_network: NetworkType | None = None
-    backend_type: str = "bitcoin_core"
+    backend_type: str = "full_node"  # full_node or neutrino
     backend_config: dict[str, Any] = Field(default_factory=dict)
 
     # Directory server settings
@@ -61,6 +61,12 @@ class TakerConfig(BaseModel):
     max_cj_fee: MaxCjFee = Field(default_factory=MaxCjFee)
     tx_fee_factor: float = Field(
         default=3.0, ge=1.0, description="Multiply estimated fee by this factor"
+    )
+    bondless_makers_allowance: float = Field(
+        default=0.125,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of time to choose makers randomly (not by fidelity bond)",
     )
 
     # PoDLE settings

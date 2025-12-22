@@ -8,7 +8,14 @@ __version__ = "2.2.0"
 
 from jmcore.directory_client import DirectoryClient, DirectoryClientError
 from jmcore.encryption import CryptoSession, NaclError
-from jmcore.models import MessageEnvelope, PeerInfo
+from jmcore.models import (
+    DIRECTORY_NODES_MAINNET,
+    DIRECTORY_NODES_SIGNET,
+    DIRECTORY_NODES_TESTNET,
+    MessageEnvelope,
+    PeerInfo,
+    get_default_directory_nodes,
+)
 from jmcore.podle import (
     PoDLECommitment,
     PoDLEError,
@@ -34,6 +41,9 @@ from jmcore.protocol import (
 
 __all__ = [
     "CryptoSession",
+    "DIRECTORY_NODES_MAINNET",
+    "DIRECTORY_NODES_SIGNET",
+    "DIRECTORY_NODES_TESTNET",
     "DirectoryClient",
     "DirectoryClientError",
     "FEATURE_NEUTRINO_COMPAT",
@@ -50,6 +60,7 @@ __all__ = [
     "deserialize_revelation",
     "format_utxo_list",
     "generate_podle",
+    "get_default_directory_nodes",
     "get_nick_version",
     "is_v6_nick",
     "parse_podle_revelation",

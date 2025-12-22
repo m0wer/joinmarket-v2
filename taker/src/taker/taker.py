@@ -250,7 +250,9 @@ class Taker:
         )
 
         # Orderbook manager
-        self.orderbook_manager = OrderbookManager(config.max_cj_fee)
+        self.orderbook_manager = OrderbookManager(
+            config.max_cj_fee, config.bondless_makers_allowance
+        )
 
         # Current CoinJoin session data
         self.cj_amount = 0

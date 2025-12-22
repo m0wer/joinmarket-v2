@@ -116,3 +116,144 @@ docker run -d \
   -e LOG_LEVEL=info \
   ghcr.io/m0wer/neutrino-api
 ```
+
+## Command Line Interface
+
+The `jm-wallet` CLI provides wallet management commands for generating mnemonics, checking balances, and managing fidelity bonds.
+
+### Installation
+
+After installing the package, the CLI is available as `jm-wallet`:
+
+```bash
+pip install -e jmwallet
+jm-wallet --help
+```
+
+### Generate New Wallet
+
+Generate a secure BIP39 mnemonic:
+
+```bash
+# Generate 24-word mnemonic (recommended)
+jm-wallet generate
+
+# Generate 12-word mnemonic
+jm-wallet generate --words 12
+
+# Save to file
+jm-wallet generate --save --output ~/.jm/wallets/my-wallet.mnemonic
+```
+
+**IMPORTANT**: Write down your mnemonic and store it securely offline. Anyone with this phrase can spend your Bitcoin.
+
+### View Wallet Balance
+
+Display balances for all mixdepths:
+
+```bash
+# Using mnemonic from environment
+export MNEMONIC="your twelve or twenty four word mnemonic phrase here"
+jm-wallet info
+
+# Using mnemonic file
+jm-wallet info --mnemonic-file ~/.jm/wallets/my-wallet.mnemonic
+
+# With custom backend (mainnet full node)
+jm-wallet info \
+  --network mainnet \
+  --backend full_node \
+  --rpc-url http://127.0.0.1:8332 \
+  --rpc-user bitcoin \
+  --rpc-password yourpassword
+```
+
+Output example:
+```
+Total Balance: 10,500,000 sats (0.10500000 BTC)
+
+Balance by mixdepth:
+  Mixdepth 0:       5,000,000 sats  |  bc1q...
+  Mixdepth 1:       3,000,000 sats  |  bc1q...
+  Mixdepth 2:       2,500,000 sats  |  bc1q...
+  Mixdepth 3:               0 sats  |  bc1q...
+  Mixdepth 4:               0 sats  |  bc1q...
+```
+
+### List Fidelity Bonds
+
+View all fidelity bonds (time-locked UTXOs) in your wallet:
+
+```bash
+jm-wallet list-bonds \
+  --mnemonic-file ~/.jm/wallets/my-wallet.mnemonic \
+  --network mainnet
+```
+
+Output example:
+```
+Found 2 fidelity bond(s):
+
+Bond #1:
+  UTXO:        abcd1234...5678:0
+  Value:       10,000,000 sats (0.10000000 BTC)
+  Locktime:    1735689600 (2025-01-01 00:00:00)
+  Confirms:    144
+  Bond Value:  5,234,567
+Bond #2:
+  UTXO:        efgh9012...3456:1
+  Value:       5,000,000 sats (0.05000000 BTC)
+  Locktime:    1767225600 (2026-01-01 00:00:00)
+  Confirms:    72
+  Bond Value:  3,456,789
+```
+
+### Using with Maker/Taker
+
+The `jm-wallet` CLI is independent of the maker and taker bots. Use it for:
+
+1. **Initial Setup**: Generate and store your mnemonic securely
+2. **Balance Checks**: Monitor your wallet without running a bot
+3. **Fidelity Bonds**: View your bonds before starting a maker
+
+For CoinJoin operations, use `jm-maker` or `jm-taker` CLIs with the same mnemonic.
+
+## Wallet Structure
+
+JoinMarket uses a mixdepth structure for privacy:
+
+- **Mixdepth 0-4**: Separate balance pools
+- **Internal Branches**:
+  - Branch 0: External (receive addresses)
+  - Branch 1: Internal (change addresses)
+  - Branch 2: Fidelity bonds (time-locked UTXOs)
+
+**Privacy Note**: Never merge coins across mixdepths outside of CoinJoin!
+
+## Security Considerations
+
+### Mnemonic Storage
+
+- **NEVER** commit mnemonics to version control
+- **NEVER** send mnemonics over unencrypted channels
+- Store encrypted mnemonic files with restricted permissions (`chmod 600`)
+- Consider hardware wallet integration for production use
+
+### File Permissions
+
+The CLI automatically sets restrictive permissions on saved mnemonic files:
+
+```bash
+# Check permissions
+ls -l ~/.jm/wallets/my-wallet.mnemonic
+# Should show: -rw------- (owner read/write only)
+```
+
+### Environment Variables
+
+For automation, use environment variables instead of command-line arguments (prevents exposure in shell history):
+
+```bash
+export MNEMONIC="your mnemonic here"
+jm-wallet info
+```

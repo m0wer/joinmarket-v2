@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 
 import typer
-from jmcore.models import NetworkType
+from jmcore.models import NetworkType, get_default_directory_nodes
 from jmwallet.backends.bitcoin_core import BitcoinCoreBackend
 from jmwallet.backends.neutrino import NeutrinoBackend
 from jmwallet.wallet.service import WalletService
@@ -29,12 +29,12 @@ def create_wallet_service(config: MakerConfig) -> WalletService:
     bitcoin_network = config.bitcoin_network or config.network
 
     backend: BitcoinCoreBackend | NeutrinoBackend
-    if backend_type == "bitcoin_core":
+    if backend_type == "full_node":
         backend_cfg = config.backend_config
         backend = BitcoinCoreBackend(
-            rpc_url=backend_cfg.get("rpc_url", "http://127.0.0.1:18443"),
-            rpc_user=backend_cfg.get("rpc_user", "test"),
-            rpc_password=backend_cfg.get("rpc_password", "test"),
+            rpc_url=backend_cfg.get("rpc_url", "http://127.0.0.1:8332"),
+            rpc_user=backend_cfg.get("rpc_user", ""),
+            rpc_password=backend_cfg.get("rpc_password", ""),
         )
     elif backend_type == "neutrino":
         backend_cfg = config.backend_config
@@ -60,25 +60,35 @@ def create_wallet_service(config: MakerConfig) -> WalletService:
 @app.command()
 def start(
     mnemonic: str = typer.Option(..., help="BIP39 mnemonic phrase"),
-    network: NetworkType = typer.Option(NetworkType.REGTEST, case_sensitive=False),
+    network: NetworkType = typer.Option(NetworkType.MAINNET, case_sensitive=False),
     bitcoin_network: NetworkType | None = typer.Option(
         None,
         case_sensitive=False,
         help="Bitcoin network for address generation (defaults to --network)",
     ),
-    backend_type: str = typer.Option("bitcoin_core", help="Backend type: bitcoin_core | neutrino"),
-    rpc_url: str | None = typer.Option(None, help="Bitcoin Core RPC URL"),
-    rpc_user: str | None = typer.Option(None, help="Bitcoin Core RPC username"),
-    rpc_password: str | None = typer.Option(None, help="Bitcoin Core RPC password"),
-    neutrino_url: str | None = typer.Option(None, help="Neutrino REST API URL"),
-    min_size: int = typer.Option(100_000, help="Minimum CoinJoin size in sats"),
-    cj_fee_relative: str = typer.Option(
-        "0.0002", help="Relative coinjoin fee (e.g., 0.0002 = 20bps)"
+    backend_type: str = typer.Option("full_node", help="Backend type: full_node | neutrino"),
+    rpc_url: str | None = typer.Option(
+        None, envvar="BITCOIN_RPC_URL", help="Bitcoin full node RPC URL"
     ),
-    tx_fee_contribution: int = typer.Option(10_000, help="Tx fee contribution in sats"),
+    rpc_user: str | None = typer.Option(
+        None, envvar="BITCOIN_RPC_USER", help="Bitcoin full node RPC username"
+    ),
+    rpc_password: str | None = typer.Option(
+        None, envvar="BITCOIN_RPC_PASSWORD", help="Bitcoin full node RPC password"
+    ),
+    neutrino_url: str | None = typer.Option(
+        None, envvar="NEUTRINO_URL", help="Neutrino REST API URL"
+    ),
+    min_size: int = typer.Option(100_000, help="Minimum CoinJoin size in sats"),
+    cj_fee_relative: str = typer.Option("0.001", help="Relative coinjoin fee (e.g., 0.001 = 0.1%)"),
+    cj_fee_absolute: int = typer.Option(
+        500, help="Absolute coinjoin fee in sats (used with absolute offer type)"
+    ),
+    tx_fee_contribution: int = typer.Option(0, help="Tx fee contribution in sats"),
     directory_servers: list[str] = typer.Option(
-        ["127.0.0.1:5222"],
-        help="Directory servers host:port (multiple allowed)",
+        None,
+        envvar="DIRECTORY_SERVERS",
+        help="Directory servers host:port (multiple allowed). Defaults to mainnet directory nodes.",
     ),
     fidelity_bond_locktimes: list[int] = typer.Option(
         [],
@@ -89,12 +99,17 @@ def start(
     # Use bitcoin_network for address generation, default to network if not specified
     actual_bitcoin_network = bitcoin_network or network
 
+    # Resolve directory servers: use provided list or default for network
+    resolved_directory_servers = (
+        directory_servers if directory_servers else get_default_directory_nodes(network)
+    )
+
     backend_config = {}
-    if backend_type == "bitcoin_core":
+    if backend_type == "full_node":
         backend_config = {
-            "rpc_url": rpc_url or "http://127.0.0.1:18443",
-            "rpc_user": rpc_user or "test",
-            "rpc_password": rpc_password or "test",
+            "rpc_url": rpc_url or "http://127.0.0.1:8332",
+            "rpc_user": rpc_user or "",
+            "rpc_password": rpc_password or "",
         }
     elif backend_type == "neutrino":
         backend_config = {
@@ -108,9 +123,10 @@ def start(
         bitcoin_network=actual_bitcoin_network,
         backend_type=backend_type,
         backend_config=backend_config,
-        directory_servers=directory_servers,
+        directory_servers=resolved_directory_servers,
         min_size=min_size,
         cj_fee_relative=cj_fee_relative,
+        cj_fee_absolute=cj_fee_absolute,
         tx_fee_contribution=tx_fee_contribution,
         fidelity_bond_locktimes=fidelity_bond_locktimes,
     )
@@ -138,13 +154,13 @@ def start(
 @app.command()
 def generate_address(
     mnemonic: str = typer.Option(..., help="BIP39 mnemonic"),
-    network: NetworkType = typer.Option(NetworkType.REGTEST, case_sensitive=False),
+    network: NetworkType = typer.Option(NetworkType.MAINNET, case_sensitive=False),
     bitcoin_network: NetworkType | None = typer.Option(
         None,
         case_sensitive=False,
         help="Bitcoin network for address generation (defaults to --network)",
     ),
-    backend_type: str = typer.Option("bitcoin_core"),
+    backend_type: str = typer.Option("full_node"),
 ):
     """Generate a new receive address."""
     actual_bitcoin_network = bitcoin_network or network

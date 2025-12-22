@@ -19,7 +19,7 @@ class MakerConfig(BaseModel):
     # If not specified, defaults to the same as network
     bitcoin_network: NetworkType | None = None
 
-    backend_type: str = "bitcoin_core"
+    backend_type: str = "full_node"  # full_node or neutrino
     backend_config: dict[str, Any] = Field(default_factory=dict)
 
     directory_servers: list[str] = Field(default_factory=list)
@@ -36,9 +36,9 @@ class MakerConfig(BaseModel):
 
     offer_type: OfferType = OfferType.SW0_RELATIVE
     min_size: int = 100_000
-    cj_fee_relative: str = "0.0002"
-    cj_fee_absolute: int = 1000
-    tx_fee_contribution: int = 10_000
+    cj_fee_relative: str = "0.001"  # 0.1% - matches taker max_rel_fee default
+    cj_fee_absolute: int = 500  # sats - matches taker max_abs_fee default
+    tx_fee_contribution: int = 0  # sats
 
     mixdepth_count: int = 5
     gap_limit: int = 20

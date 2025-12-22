@@ -8,7 +8,11 @@ dependencies = [
     "httpx>=0.25.0",
     "loguru>=0.7.0",
     "pydantic>=2.0.0",
+    "typer>=0.9.0",
 ]
+
+[project.scripts]
+jm-wallet = "jmwallet.cli:main"
 
 [project.optional-dependencies]
 dev = [

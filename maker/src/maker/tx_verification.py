@@ -67,7 +67,7 @@ def verify_unsigned_transaction(
     cjfee: str | int,
     txfee: int,
     offer_type: OfferType,
-    network: NetworkType = NetworkType.REGTEST,
+    network: NetworkType = NetworkType.MAINNET,
 ) -> tuple[bool, str]:
     """
     Verify unsigned CoinJoin transaction proposed by taker.
@@ -167,7 +167,7 @@ def verify_unsigned_transaction(
 
 
 def parse_transaction(
-    tx_hex: str, network: NetworkType = NetworkType.REGTEST
+    tx_hex: str, network: NetworkType = NetworkType.MAINNET
 ) -> dict[str, Any] | None:
     """
     Parse Bitcoin transaction hex.
@@ -257,7 +257,7 @@ def read_varint(data: bytes, offset: int) -> tuple[int, int]:
         return value, offset + 8
 
 
-def script_to_address(script: bytes, network: NetworkType = NetworkType.REGTEST) -> str:
+def script_to_address(script: bytes, network: NetworkType = NetworkType.MAINNET) -> str:
     """
     Convert scriptPubKey to address.
 

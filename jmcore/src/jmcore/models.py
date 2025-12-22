@@ -11,6 +11,34 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+# Default directory servers for each network
+# Mainnet nodes verified as working (from https://joinmarketv2.sgn.space/orderbook.json)
+DIRECTORY_NODES_MAINNET: list[str] = [
+    "satoshi2vcg5e2ept7tjkzlkpomkobqmgtsjzegg6wipnoajadissead.onion:5222",
+    "coinjointovy3eq5fjygdwpkbcdx63d7vd4g32mw7y553uj3kjjzkiqd.onion:5222",
+    "nakamotourflxwjnjpnrk7yc2nhkf6r62ed4gdfxmmn5f4saw5q5qoyd.onion:5222",
+    "shssats5ucnwdpbticbb4dymjzf2o27tdecpes35ededagjpdmpxm6yd.onion:5222",
+    "odpwaf67rs5226uabcamvypg3y4bngzmfk7255flcdodesqhsvkptaid.onion:5222",
+    "jmv2dirze66rwxsq7xv7frhmaufyicd3yz5if6obtavsskczjkndn6yd.onion:5222",
+    "jmarketxf5wc4aldf3slm5u6726zsky52bqnfv6qyxe5hnafgly6yuyd.onion:5222",
+]
+
+# No default directory nodes for testnet/signet/regtest - must be configured by user
+DIRECTORY_NODES_SIGNET: list[str] = []
+DIRECTORY_NODES_TESTNET: list[str] = []
+
+
+def get_default_directory_nodes(network: NetworkType) -> list[str]:
+    """Get default directory nodes for a given network."""
+    if network == NetworkType.MAINNET:
+        return DIRECTORY_NODES_MAINNET.copy()
+    elif network == NetworkType.SIGNET:
+        return DIRECTORY_NODES_SIGNET.copy()
+    elif network == NetworkType.TESTNET:
+        return DIRECTORY_NODES_TESTNET.copy()
+    # Regtest has no default directory nodes - must be configured
+    return []
+
 
 class PeerStatus(str, Enum):
     UNCONNECTED = "unconnected"
