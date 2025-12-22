@@ -123,7 +123,7 @@ class TestNeutrinoUTXOOperations:
         # This address should have received funds from the miner
         address = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"
 
-        utxos = await neutrino_backend.get_utxos(address)
+        utxos = await neutrino_backend.get_utxos([address])
         # May or may not have UTXOs depending on test state
         assert isinstance(utxos, list)
 
