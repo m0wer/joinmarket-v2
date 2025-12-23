@@ -250,8 +250,8 @@ services:
       - MIN_SIZE=10000
       - TX_FEE_CONTRIBUTION=500
       - CJ_FEE_RELATIVE=0.0003
-      # Fidelity bond locktime: Jan 1, 2025 (Unix timestamp)
-      - FIDELITY_BOND_LOCKTIMES=1735689600
+      # Fidelity bond locktime: Jan 1, 2140 (Unix timestamp)
+      - FIDELITY_BOND_LOCKTIMES=5364662400
     networks:
       - jm-network
     depends_on:

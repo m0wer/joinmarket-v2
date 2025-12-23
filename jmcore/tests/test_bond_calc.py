@@ -51,7 +51,7 @@ def test_bond_value_expired():
     utxo_value = 100_000_000
     confirm_time = int(datetime(2023, 1, 1, tzinfo=UTC).timestamp())
     locktime = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp())
-    current_time = int(datetime(2025, 1, 1, tzinfo=UTC).timestamp())  # 1 year after expiry
+    current_time = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp())  # 2 years after expiry
 
     value = calculate_timelocked_fidelity_bond_value(
         utxo_value=utxo_value,
@@ -71,7 +71,7 @@ def test_bond_value_decay():
     # Bond partially decayed
     utxo_value = 100_000_000
     confirm_time = int(datetime(2023, 1, 1, tzinfo=UTC).timestamp())
-    locktime = int(datetime(2025, 1, 1, tzinfo=UTC).timestamp())  # 2 years
+    locktime = int(datetime(2026, 1, 1, tzinfo=UTC).timestamp())  # 3 years
 
     # Check at start
     val_start = calculate_timelocked_fidelity_bond_value(
@@ -97,7 +97,7 @@ def test_bond_value_decay():
         utxo_value=utxo_value,
         confirmation_time=confirm_time,
         locktime=locktime,
-        current_time=int(datetime(2025, 2, 1, tzinfo=UTC).timestamp()),
+        current_time=int(datetime(2026, 2, 1, tzinfo=UTC).timestamp()),
     )
 
     assert val_expired_bit < val_start
