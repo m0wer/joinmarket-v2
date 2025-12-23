@@ -1,115 +1,38 @@
 # JoinMarket Wallet Library (jmwallet)
 
-Modern Hierarchical Deterministic (HD) wallet implementation for JoinMarket refactor.
-
-```
-jmwallet/
-├── src/jmwallet/
-│   ├── backends/         # Blockchain backends (Bitcoin Core, Neutrino)
-│   ├── wallet/           # BIP32/39/84 implementation
-│   └── __init__.py
-├── tests/               # Unit tests
-└── pyproject.toml       # Package metadata
-```
-
-## Features
-
-- **Multi-backend architecture** (Bitcoin Core RPC, Neutrino SPV)
-- **No BerkeleyDB dependency** (works with Bitcoin Core v30+)
-- **BIP32/BIP39/BIP84** HD wallet implementation
-- **JoinMarket mixdepth support** (5 isolation levels)
-- **P2WPKH address generation** (BIP173 bech32)
-- **UTXO management + coin selection**
-- **Transaction signing utilities** (P2WPKH inputs)
-
-### Solving the BerkeleyDB Problem
-
-Reference JoinMarket requires Bitcoin Core wallet (BerkeleyDB) for `importaddress`, which breaks on Bitcoin Core v30+.
-
-**jmwallet solution:** Connect directly to Bitcoin Core's RPCs (`scantxoutset`, `getblockchaininfo`, etc.) — **no wallet.dat needed!** This makes it compatible with modern Bitcoin Core without deprecated settings.
+Modern HD wallet for JoinMarket with support for Bitcoin Core nodes and lightweight Neutrino SPV.
 
 ## Installation
 
 ```bash
 cd jmwallet
-pip install -e .[dev]
+pip install -e .
 ```
 
 ## Quick Start
 
-```python
-import asyncio
-from jmwallet.backends.bitcoin_core import BitcoinCoreBackend
-from jmwallet.wallet.service import WalletService
+### 1. Generate a Wallet
 
-async def main():
-    backend = BitcoinCoreBackend(
-        rpc_url="http://127.0.0.1:18443",
-        rpc_user="test",
-        rpc_password="test",
-    )
-
-    wallet = WalletService(
-        mnemonic="abandon abandon ... about",
-        backend=backend,
-        network="regtest",
-    )
-
-    await wallet.sync_all()
-    balance = await wallet.get_total_balance()
-    print(f"Balance: {balance:,} sats")
-
-    utxos = wallet.select_utxos(mixdepth=0, target_amount=50_000)
-    print(f"Selected {len(utxos)} UTXOs")
-
-asyncio.run(main())
-```
-
-## Backends
-
-### Bitcoin Core Backend
-- Uses `scantxoutset` RPC to find UTXOs
-- No need to import addresses into wallet
-- Works with v30+ (descriptor wallets)
-- **Best for:** Maximum security, production deployments
-
-```python
-from jmwallet.backends.bitcoin_core import BitcoinCoreBackend
-
-backend = BitcoinCoreBackend(
-    rpc_url="http://127.0.0.1:8332",
-    rpc_user="user",
-    rpc_password="password",
-)
-```
-
-### Neutrino Backend (BIP157/158)
-- Lightweight SPV using compact block filters
-- No full node required (~500MB vs ~500GB)
-- Privacy-preserving (downloads filters, not addresses)
-- **Best for:** Beginners, low-resource environments, mobile
-
-```python
-from jmwallet.backends.neutrino import NeutrinoBackend, NeutrinoConfig
-
-config = NeutrinoConfig(
-    base_url="http://localhost:8080",
-    network="mainnet",
-    timeout=30.0
-)
-backend = NeutrinoBackend(config)
-```
-
-**Running the Neutrino server:**
-
-The Neutrino server is maintained separately at [github.com/m0wer/neutrino-api](https://github.com/m0wer/neutrino-api).
+Create an encrypted wallet file with password protection:
 
 ```bash
-# With Docker Compose (from jm-refactor root)
-docker-compose --profile neutrino up -d neutrino
+mkdir -p ~/.jm/wallets
+jm-wallet generate --save --prompt-password --output ~/.jm/wallets/wallet.mnemonic
+```
 
-# Or run standalone
+**IMPORTANT**: The mnemonic is displayed once during generation. Write it down and store it securely offline - it's your only backup if you lose the encrypted file!
+
+### 2. Choose Your Backend
+
+#### Option A: Neutrino (Recommended for Beginners)
+
+Lightweight SPV backend - no full node needed (~500MB vs ~500GB).
+
+Start Neutrino server with Docker:
+
+```bash
 docker run -d \
+  --name neutrino \
   -p 8334:8334 \
   -v neutrino-data:/data/neutrino \
   -e NETWORK=mainnet \
@@ -117,58 +40,44 @@ docker run -d \
   ghcr.io/m0wer/neutrino-api
 ```
 
-## Command Line Interface
+**Note**: Pre-built binaries are also available in the [m0wer/neutrino-api](https://github.com/m0wer/neutrino-api/releases) releases.
 
-The `jm-wallet` CLI provides wallet management commands for generating mnemonics, checking balances, and managing fidelity bonds.
-
-### Installation
-
-After installing the package, the CLI is available as `jm-wallet`:
+Check wallet balance:
 
 ```bash
-pip install -e jmwallet
-jm-wallet --help
-```
-
-### Generate New Wallet
-
-Generate a secure BIP39 mnemonic:
-
-```bash
-# Generate 24-word mnemonic (recommended)
-jm-wallet generate
-
-# Generate 12-word mnemonic
-jm-wallet generate --words 12
-
-# Save to file
-jm-wallet generate --save --output ~/.jm/wallets/my-wallet.mnemonic
-```
-
-**IMPORTANT**: Write down your mnemonic and store it securely offline. Anyone with this phrase can spend your Bitcoin.
-
-### View Wallet Balance
-
-Display balances for all mixdepths:
-
-```bash
-# Using mnemonic from environment
-export MNEMONIC="your twelve or twenty four word mnemonic phrase here"
-jm-wallet info
-
-# Using mnemonic file
-jm-wallet info --mnemonic-file ~/.jm/wallets/my-wallet.mnemonic
-
-# With custom backend (mainnet full node)
 jm-wallet info \
-  --network mainnet \
-  --backend full_node \
-  --rpc-url http://127.0.0.1:8332 \
-  --rpc-user bitcoin \
-  --rpc-password yourpassword
+  --mnemonic-file ~/.jm/wallets/wallet.mnemonic \
+  --backend neutrino
 ```
 
-Output example:
+#### Option B: Bitcoin Core Full Node
+
+For maximum security and privacy. Requires a synced Bitcoin Core node (v23+).
+
+Create a config file to avoid exposing credentials in shell history:
+
+```bash
+cat > ~/.jm/wallet.conf << EOF
+BITCOIN_RPC_URL=http://127.0.0.1:8332
+BITCOIN_RPC_USER=your_rpc_user
+BITCOIN_RPC_PASSWORD=your_rpc_password
+EOF
+chmod 600 ~/.jm/wallet.conf
+```
+
+Load config and check balance:
+
+```bash
+source ~/.jm/wallet.conf
+jm-wallet info \
+  --mnemonic-file ~/.jm/wallets/wallet.mnemonic \
+  --backend full_node
+```
+
+### 3. View Your Addresses
+
+The wallet info command displays your balance across 5 mixdepths:
+
 ```
 Total Balance: 10,500,000 sats (0.10500000 BTC)
 
@@ -180,80 +89,109 @@ Balance by mixdepth:
   Mixdepth 4:               0 sats  |  bc1q...
 ```
 
-### List Fidelity Bonds
+**Privacy Note**: Never merge coins across mixdepths outside of CoinJoin!
 
-View all fidelity bonds (time-locked UTXOs) in your wallet:
+## CLI Commands
+
+### Generate Wallet
 
 ```bash
-jm-wallet list-bonds \
-  --mnemonic-file ~/.jm/wallets/my-wallet.mnemonic \
-  --network mainnet
+# Generate and save encrypted wallet (RECOMMENDED)
+jm-wallet generate --save --prompt-password --output ~/.jm/wallets/wallet.mnemonic
+
+# Just generate (display only, not saved)
+jm-wallet generate
+
+# 12-word mnemonic instead of 24
+jm-wallet generate --words 12 --save --prompt-password --output ~/.jm/wallets/wallet.mnemonic
 ```
 
-Output example:
-```
-Found 2 fidelity bond(s):
+**Note**: `--prompt-password` only works with `--save`. The wallet file is encrypted and requires the password to use.
 
-Bond #1:
-  UTXO:        abcd1234...5678:0
-  Value:       10,000,000 sats (0.10000000 BTC)
-  Locktime:    1735689600 (2025-01-01 00:00:00)
-  Confirms:    144
-  Bond Value:  5,234,567
-Bond #2:
-  UTXO:        efgh9012...3456:1
-  Value:       5,000,000 sats (0.05000000 BTC)
-  Locktime:    1767225600 (2026-01-01 00:00:00)
-  Confirms:    72
-  Bond Value:  3,456,789
+### View Balance
+
+```bash
+# Neutrino backend (default ports)
+jm-wallet info --mnemonic-file ~/.jm/wallets/wallet.mnemonic --backend neutrino
+
+# Bitcoin Core (with config file)
+source ~/.jm/wallet.conf
+jm-wallet info --mnemonic-file ~/.jm/wallets/wallet.mnemonic --backend full_node
 ```
 
-### Using with Maker/Taker
+### List Fidelity Bonds
 
-The `jm-wallet` CLI is independent of the maker and taker bots. Use it for:
+```bash
+jm-wallet list-bonds --mnemonic-file ~/.jm/wallets/wallet.mnemonic
+```
 
-1. **Initial Setup**: Generate and store your mnemonic securely
-2. **Balance Checks**: Monitor your wallet without running a bot
-3. **Fidelity Bonds**: View your bonds before starting a maker
+### All Commands
 
-For CoinJoin operations, use `jm-maker` or `jm-taker` CLIs with the same mnemonic.
+```bash
+jm-wallet --help
+jm-wallet generate --help
+jm-wallet info --help
+jm-wallet list-bonds --help
+```
+
+## Features
+
+- BIP32/BIP39/BIP84 HD wallet implementation
+- 5 mixdepth isolation for privacy
+- P2WPKH native segwit addresses (bc1...)
+- Multi-backend: Bitcoin Core RPC or Neutrino SPV
+- No BerkeleyDB dependency (works with Bitcoin Core v23+)
+- Encrypted mnemonic storage
 
 ## Wallet Structure
 
-JoinMarket uses a mixdepth structure for privacy:
+JoinMarket uses mixdepths for privacy isolation:
 
 - **Mixdepth 0-4**: Separate balance pools
-- **Internal Branches**:
-  - Branch 0: External (receive addresses)
-  - Branch 1: Internal (change addresses)
-  - Branch 2: Fidelity bonds (time-locked UTXOs)
+- **Branches per mixdepth**:
+  - Branch 0: External (receive) addresses
+  - Branch 1: Internal (change) addresses
+  - Branch 2: Fidelity bonds (time-locked)
 
-**Privacy Note**: Never merge coins across mixdepths outside of CoinJoin!
+## Security Notes
 
-## Security Considerations
+- Mnemonic files are encrypted with Fernet (symmetric encryption)
+- Files automatically get restrictive permissions (`chmod 600`)
+- Use config files for RPC credentials instead of command-line args
+- Never commit mnemonics or config files to version control
 
-### Mnemonic Storage
+## Using with Maker/Taker Bots
 
-- **NEVER** commit mnemonics to version control
-- **NEVER** send mnemonics over unencrypted channels
-- Store encrypted mnemonic files with restricted permissions (`chmod 600`)
-- Consider hardware wallet integration for production use
+The `jm-wallet` CLI is for wallet management only. For CoinJoin operations:
 
-### File Permissions
+1. Generate wallet: `jm-wallet generate --save --prompt-password`
+2. Fund addresses: Send Bitcoin to mixdepth addresses
+3. Run bots: Use `jm-maker` or `jm-taker` with same wallet file
 
-The CLI automatically sets restrictive permissions on saved mnemonic files:
+## Advanced: Python API
 
-```bash
-# Check permissions
-ls -l ~/.jm/wallets/my-wallet.mnemonic
-# Should show: -rw------- (owner read/write only)
+For programmatic access:
+
+```python
+import asyncio
+from jmwallet.backends.neutrino import NeutrinoBackend, NeutrinoConfig
+from jmwallet.wallet.service import WalletService
+
+async def main():
+    config = NeutrinoConfig(base_url="http://localhost:8334", network="mainnet")
+    backend = NeutrinoBackend(config)
+
+    wallet = WalletService(
+        mnemonic="your mnemonic phrase here",
+        backend=backend,
+        network="mainnet",
+    )
+
+    await wallet.sync_all()
+    balance = await wallet.get_total_balance()
+    print(f"Balance: {balance:,} sats")
+
+asyncio.run(main())
 ```
 
-### Environment Variables
-
-For automation, use environment variables instead of command-line arguments (prevents exposure in shell history):
-
-```bash
-export MNEMONIC="your mnemonic here"
-jm-wallet info
-```
+See code documentation for full API details.

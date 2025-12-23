@@ -1,169 +1,144 @@
 # JoinMarket Maker Bot
 
-A maker (yield generator) bot for JoinMarket CoinJoin transactions. Makers provide liquidity for privacy-enhancing CoinJoin transactions and earn fees in return.
-
-## Features
-
-- Protocol v5 compatible with reference JoinMarket and Neutrino backends
-- Fidelity bond support for improved offer visibility
-- PoDLE verification (anti-sybil protection)
-- Transaction verification (prevents loss of funds)
-- Support for Bitcoin full node or Neutrino light client backends
-- Tor integration for privacy
-
-## Requirements
-
-- Python 3.11+
-- Tor (for connecting to directory nodes and serving hidden service)
-- Bitcoin backend: full node (Bitcoin Core, Knots, etc.) or Neutrino
+Earn fees by providing liquidity for CoinJoin transactions. Makers passively earn bitcoin while enhancing network privacy.
 
 ## Installation
 
 ```bash
-# Install dependencies
-pip install -e ../jmcore
-pip install -e ../jmwallet
-pip install -e .
+pip install -e ../jmcore ../jmwallet .
 ```
 
 ## Quick Start
 
-### 0. Generate a wallet (optional)
+### 1. Create a Wallet
 
-If you don't have a mnemonic yet, generate one with the wallet CLI:
+Generate an encrypted wallet file:
 
 ```bash
-# Generate and display a new 24-word mnemonic
-jm-wallet generate
-
-# Or save to encrypted file
-jm-wallet generate --save --output ~/.jm/wallets/maker.mnemonic
+mkdir -p ~/.jm/wallets
+jm-wallet generate --save --prompt-password --output ~/.jm/wallets/maker.mnemonic
 ```
 
-**IMPORTANT**: Write down your mnemonic and store it securely offline. Anyone with this phrase can spend your Bitcoin.
+**IMPORTANT**: Write down the displayed mnemonic - it's your only backup!
 
-For more wallet management commands (checking balances, listing fidelity bonds), see the [jmwallet README](../jmwallet/README.md).
+See [jmwallet README](../jmwallet/README.md) for wallet management details.
 
-### 1. Generate a wallet address
+### 2. Check Balance & Get Deposit Address
 
 ```bash
-jm-maker generate-address --mnemonic "your twelve word mnemonic phrase here"
+# View balance and addresses
+jm-wallet info --mnemonic-file ~/.jm/wallets/maker.mnemonic --backend neutrino
+
+# Or use jm-maker to get a specific address
+jm-maker generate-address --mnemonic-file ~/.jm/wallets/maker.mnemonic
 ```
 
-### 2. Fund your wallet
+### 3. Fund Your Wallet
 
-Send bitcoin to the generated address. For best results, fund multiple mixdepths.
+Send bitcoin to displayed addresses. For best results, spread funds across multiple mixdepths (0-4).
 
-### 3. Start the maker bot
+**Minimum**: ~100,000 sats per mixdepth to create offers.
+
+### 4. Start Earning Fees
+
+#### Option A: Neutrino Backend (Recommended for Beginners)
+
+Start Neutrino server:
 
 ```bash
-jm-maker start --mnemonic "your twelve word mnemonic phrase here"
+docker run -d \
+  --name neutrino \
+  -p 8334:8334 \
+  -v neutrino-data:/data/neutrino \
+  -e NETWORK=mainnet \
+  -e LOG_LEVEL=info \
+  ghcr.io/m0wer/neutrino-api
+```
+
+**Note**: Pre-built binaries available at [m0wer/neutrino-api releases](https://github.com/m0wer/neutrino-api/releases).
+
+Start maker bot:
+
+```bash
+jm-maker start \
+  --mnemonic-file ~/.jm/wallets/maker.mnemonic \
+  --backend-type neutrino
+```
+
+#### Option B: Bitcoin Core Full Node
+
+For maximum security. Create config file to avoid credentials in shell history:
+
+```bash
+cat > ~/.jm/maker.conf << EOF
+export BITCOIN_RPC_URL=http://127.0.0.1:8332
+export BITCOIN_RPC_USER=your_rpc_user
+export BITCOIN_RPC_PASSWORD=your_rpc_password
+EOF
+chmod 600 ~/.jm/maker.conf
+```
+
+Start maker bot:
+
+```bash
+source ~/.jm/maker.conf
+jm-maker start \
+  --mnemonic-file ~/.jm/wallets/maker.mnemonic \
+  --backend-type full_node
 ```
 
 The bot will:
-1. Sync your wallet with the blockchain
-2. Create offers based on your available balance
-3. Connect to JoinMarket directory servers
-4. Announce offers and wait for takers
-
-## CLI Reference
-
-### `jm-maker start`
-
-Start the maker bot and begin publishing offers.
-
-```
-Options:
-  --mnemonic TEXT              BIP39 mnemonic phrase [required]
-  --network [mainnet|testnet|signet|regtest]
-                               Protocol network [default: mainnet]
-  --bitcoin-network [mainnet|testnet|signet|regtest]
-                               Bitcoin network for addresses (defaults to --network)
-  --backend-type TEXT          Backend: full_node | neutrino [default: full_node]
-  --rpc-url TEXT               Bitcoin full node RPC URL [env: BITCOIN_RPC_URL]
-  --rpc-user TEXT              Bitcoin full node RPC user [env: BITCOIN_RPC_USER]
-  --rpc-password TEXT          Bitcoin full node RPC password [env: BITCOIN_RPC_PASSWORD]
-  --neutrino-url TEXT          Neutrino REST API URL [env: NEUTRINO_URL]
-  --min-size INTEGER           Minimum CoinJoin size in sats [default: 100000]
-  --cj-fee-relative TEXT       Relative fee (e.g., 0.001 = 0.1%) [default: 0.001]
-  --cj-fee-absolute INTEGER    Absolute fee in sats [default: 500]
-  --tx-fee-contribution INTEGER
-                               Tx fee contribution in sats [default: 0]
-  --directory-servers TEXT     Directory servers host:port (multiple allowed)
-  --fidelity-bond-locktimes INTEGER
-                               Fidelity bond locktimes to scan for (multiple allowed)
-```
-
-### `jm-maker generate-address`
-
-Generate a new receive address for funding.
-
-```
-Options:
-  --mnemonic TEXT              BIP39 mnemonic phrase [required]
-  --network [mainnet|testnet|signet|regtest]
-                               Network [default: mainnet]
-  --bitcoin-network [mainnet|testnet|signet|regtest]
-                               Bitcoin network for addresses
-  --backend-type TEXT          Backend type [default: full_node]
-```
+- Sync your wallet
+- Create offers based on available balance
+- Connect to directory servers via Tor
+- Wait for takers and earn fees automatically
 
 ## Configuration
 
-### Fee Settings
+### Default Fee Settings
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--cj-fee-relative` | 0.001 | Relative fee as decimal (0.001 = 0.1%) |
-| `--cj-fee-absolute` | 500 | Absolute fee in satoshis |
-| `--tx-fee-contribution` | 0 | Mining fee contribution per tx |
-| `--min-size` | 100000 | Minimum CoinJoin amount (sats) |
+The defaults are sensible for most users:
 
-### Backend Configuration
+- **Relative fee**: 0.1% (0.001)
+- **Absolute fee**: 500 sats
+- **Minimum size**: 100,000 sats
 
-**Full Node (Bitcoin Core, Knots, etc.):**
+### Custom Fee Settings
+
 ```bash
 jm-maker start \
-  --mnemonic "..." \
-  --backend-type full_node \
-  --rpc-url http://127.0.0.1:8332 \
-  --rpc-user youruser \
-  --rpc-password yourpassword
-```
-
-**Neutrino (light client):**
-```bash
-jm-maker start \
-  --mnemonic "..." \
+  --mnemonic-file ~/.jm/wallets/maker.mnemonic \
   --backend-type neutrino \
-  --neutrino-url http://127.0.0.1:8334
+  --cj-fee-relative 0.002 \
+  --cj-fee-absolute 1000 \
+  --min-size 200000
 ```
 
-### Fidelity Bonds
+### Fidelity Bonds (Advanced)
 
-Fidelity bonds increase your offer visibility in the orderbook. To use fidelity bonds:
+Increase offer visibility by locking bitcoin for a period. See wallet CLI:
 
-1. Create a timelocked UTXO at the fidelity bond address (mixdepth 0, internal branch 2)
-2. Specify the locktime when starting the maker:
+```bash
+# Generate bond address
+jm-wallet generate-bond-address \
+  --mnemonic-file ~/.jm/wallets/maker.mnemonic \
+  --locktime 1735689600
+
+# List existing bonds
+jm-wallet list-bonds --mnemonic-file ~/.jm/wallets/maker.mnemonic
+```
+
+Specify bond locktimes when starting:
 
 ```bash
 jm-maker start \
-  --mnemonic "..." \
-  --fidelity-bond-locktimes 1735689600 \
-  --fidelity-bond-locktimes 1767225600
+  --mnemonic-file ~/.jm/wallets/maker.mnemonic \
+  --fidelity-bond-locktimes 1735689600
 ```
 
-The locktime should be a Unix timestamp. Common practice is to use dates like January 1st of future years.
+## Docker Deployment
 
-## Docker
-
-### Build
-
-```bash
-docker build -t jm-maker -f Dockerfile ..
-```
-
-### Docker Compose with Full Node
+### With Neutrino
 
 ```yaml
 services:
@@ -172,126 +147,110 @@ services:
       context: ..
       dockerfile: maker/Dockerfile
     environment:
-      MNEMONIC: "your twelve word mnemonic phrase here"
-      NETWORK: mainnet
-      BACKEND_TYPE: full_node
-      BITCOIN_RPC_URL: http://bitcoind:8332
-      BITCOIN_RPC_USER: rpcuser
-      BITCOIN_RPC_PASSWORD: rpcpassword
-      CJ_FEE_RELATIVE: "0.001"
-      MIN_SIZE: "100000"
-    depends_on:
-      - bitcoind
-      - tor
-    networks:
-      - jm-network
-
-  bitcoind:
-    image: kylemanna/bitcoind
-    volumes:
-      - bitcoin-data:/bitcoin/.bitcoin
-    networks:
-      - jm-network
-
-  tor:
-    image: dperson/torproxy
-    environment:
-      TOR_NewCircuitPeriod: 30
-    networks:
-      - jm-network
-
-networks:
-  jm-network:
-
-volumes:
-  bitcoin-data:
-```
-
-### Docker Compose with Neutrino
-
-```yaml
-services:
-  maker:
-    build:
-      context: ..
-      dockerfile: maker/Dockerfile
-    environment:
-      MNEMONIC: "your twelve word mnemonic phrase here"
-      NETWORK: mainnet
+      MNEMONIC_FILE: /wallets/maker.mnemonic
       BACKEND_TYPE: neutrino
       NEUTRINO_URL: http://neutrino:8334
-      CJ_FEE_RELATIVE: "0.001"
-      MIN_SIZE: "100000"
+    volumes:
+      - ~/.jm/wallets:/wallets:ro
     depends_on:
       - neutrino
       - tor
-    networks:
-      - jm-network
 
   neutrino:
-    image: lightninglabs/neutrino:latest
-    command:
-      - --mainnet
-      - --rpcuser=neutrino
-      - --rpcpass=neutrino
+    image: ghcr.io/m0wer/neutrino-api
+    environment:
+      NETWORK: mainnet
     volumes:
-      - neutrino-data:/data
-    networks:
-      - jm-network
+      - neutrino-data:/data/neutrino
 
   tor:
     image: dperson/torproxy
-    networks:
-      - jm-network
-
-networks:
-  jm-network:
 
 volumes:
   neutrino-data:
 ```
 
-## Environment Variables
+### With Bitcoin Core
 
-| Variable | Description |
-|----------|-------------|
-| `MNEMONIC` | BIP39 mnemonic phrase |
-| `NETWORK` | Protocol network (mainnet, testnet, signet, regtest) |
-| `BITCOIN_NETWORK` | Bitcoin network for addresses |
-| `BACKEND_TYPE` | Backend type (full_node, neutrino) |
-| `BITCOIN_RPC_URL` | Full node RPC URL |
-| `BITCOIN_RPC_USER` | Full node RPC username |
-| `BITCOIN_RPC_PASSWORD` | Full node RPC password |
-| `NEUTRINO_URL` | Neutrino REST API URL |
-| `DIRECTORY_SERVERS` | Comma-separated directory servers |
-| `CJ_FEE_RELATIVE` | Relative CoinJoin fee |
-| `CJ_FEE_ABSOLUTE` | Absolute CoinJoin fee |
-| `TX_FEE_CONTRIBUTION` | Transaction fee contribution |
-| `MIN_SIZE` | Minimum CoinJoin size |
-| `FIDELITY_BOND_LOCKTIMES` | Comma-separated fidelity bond locktimes |
+```yaml
+services:
+  maker:
+    build:
+      context: ..
+      dockerfile: maker/Dockerfile
+    environment:
+      MNEMONIC_FILE: /wallets/maker.mnemonic
+      BACKEND_TYPE: full_node
+      BITCOIN_RPC_URL: http://bitcoind:8332
+      BITCOIN_RPC_USER: rpcuser
+      BITCOIN_RPC_PASSWORD: rpcpassword
+    volumes:
+      - ~/.jm/wallets:/wallets:ro
+    depends_on:
+      - bitcoind
+      - tor
 
-## Security Considerations
+  bitcoind:
+    image: kylemanna/bitcoind
+    volumes:
+      - bitcoin-data:/bitcoin/.bitcoin
 
-- **Never share your mnemonic phrase**
-- Store the mnemonic securely (hardware wallet, encrypted storage)
-- The maker bot verifies all transactions before signing to prevent fund loss
-- Use Tor for privacy when connecting to directory servers
-- Consider running on a dedicated machine or VM
+  tor:
+    image: dperson/torproxy
+
+volumes:
+  bitcoin-data:
+```
+
+Run with:
+
+```bash
+docker-compose up -d
+```
+
+## CLI Reference
+
+```bash
+# Start maker bot
+jm-maker start [OPTIONS]
+
+# Generate receive address
+jm-maker generate-address [OPTIONS]
+
+# See all options
+jm-maker start --help
+```
+
+### Key Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--mnemonic-file` | - | Path to encrypted wallet file |
+| `--backend-type` | full_node | Backend: full_node or neutrino |
+| `--cj-fee-relative` | 0.001 | Relative fee (0.001 = 0.1%) |
+| `--cj-fee-absolute` | 500 | Absolute fee in sats |
+| `--min-size` | 100000 | Minimum CoinJoin size in sats |
+
+Use env vars for RPC credentials (see jmwallet README).
+
+## Security
+
+- Wallet files are encrypted - keep your password safe
+- Bot verifies all transactions before signing
+- All directory connections go through Tor
+- Never expose your mnemonic or share wallet files
+- File permissions automatically set to 600
 
 ## Troubleshooting
 
-### "No offers created"
-- Check that your wallet has sufficient balance
-- Minimum offer size is 100,000 sats by default
+**"No offers created"**
+- Check balance: `jm-wallet info --mnemonic-file ~/.jm/wallets/maker.mnemonic`
+- Need at least 100,000 sats per mixdepth by default
 
-### "Failed to connect to directory server"
-- Ensure Tor is running and accessible
-- Check that the directory server addresses are correct
+**"Failed to connect to directory server"**
+- Ensure Tor is running
+- Check network connectivity
 
-### "Transaction verification failed"
-- This is a safety feature - the transaction proposed by the taker was invalid
-- No action needed, your funds are safe
-
-## License
-
-MIT
+**"Transaction verification failed"**
+- Safety feature - invalid transaction from taker
+- Your funds are safe, no action needed
