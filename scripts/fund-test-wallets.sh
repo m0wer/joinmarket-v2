@@ -47,9 +47,9 @@ MAKER2_ADDR="bcrt1qfuzpvnf2lgg8z54p3xcjp8xf8x5ydla63tgud2"
 TAKER_ADDR="bcrt1q84l5vscg3pvjn6se8jp4ruymtyh393ed5v2d9e"
 
 # Fidelity bond P2WSH address for Maker1
-# Path: m/84'/1'/0'/2/0 with locktime 5364662400 (Jan 1, 2140)
-# Generated with: python generate_fidelity_bond_address.py "avoid whisper..." 5364662400 --network regtest
-MAKER1_FIDELITY_BOND_ADDR="bcrt1q39q3d3w6xlt73vgcsxly8x37hd5ntces07zkfk80kf8dly4p0lgsefp9d0"
+# Path: m/84'/1'/0'/2/0 with locktime 4102444800 (Jan 1, 2100)
+# Generated with: python generate_fidelity_bond_address.py "avoid whisper..." 4102444800 --network regtest
+MAKER1_FIDELITY_BOND_ADDR="bcrt1qydklh78dpt3hhvxrmu6y56n26dkmx0nalt2arj86ygqywnmyl9tst8f989"
 
 echo "Funding maker and taker wallets..."
 echo "  Maker1: $MAKER1_ADDR"
