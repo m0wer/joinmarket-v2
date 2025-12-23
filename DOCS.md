@@ -406,7 +406,7 @@ The nick format enables:
 1. Anti-spoofing via message signatures
 2. Nick recovery across multiple message channels
 
-**Note**: Our implementation uses J5 nicks for compatibility with the reference implementation. Peers with J6+ nicks are assumed to support `neutrino_compat` as a fallback detection method.
+**Note**: Our implementation uses J5 nicks for compatibility with the reference implementation. All feature detection (like `neutrino_compat`) happens via handshake features, not nick version.
 
 ---
 
@@ -420,7 +420,7 @@ This implementation uses **feature flags** instead of protocol version bumps to 
 
 **Why feature flags instead of version bumps?**
 
-1. **Backward Compatibility**: The reference implementation (JAM) only accepts `proto-ver=5`. Version bumps would break interoperability.
+1. **Backward Compatibility**: The reference implementation from [joinmarket-clientserver](https://github.com/JoinMarket-Org/joinmarket-clientserver/) only accepts `proto-ver=5`. Version bumps would break interoperability.
 2. **Granular Adoption**: Features can be adopted independently without forcing "all or nothing" upgrades.
 3. **Progressive Enhancement**: Peers advertise what they support; both sides negotiate capabilities per-session.
 
@@ -434,10 +434,12 @@ We maintain v5 for full compatibility. New capabilities are negotiated via featu
 
 ### Feature Detection
 
-Features are detected through multiple mechanisms (in priority order):
+Features are detected through the **handshake features dict**. During CoinJoin sessions, makers advertise features in their `!pubkey` response (e.g., `features=neutrino_compat`).
 
-1. **Handshake features dict**: Explicit feature advertisement (preferred)
-2. **Nick version fallback**: J6+ nicks assumed to support `neutrino_compat` (legacy compatibility)
+This approach ensures:
+- **Smooth rollout**: No network-wide upgrades required
+- **Backwards compatibility**: Legacy peers ignore unknown fields
+- **No version fragmentation**: All peers use protocol v5
 
 ### Available Features
 
@@ -584,6 +586,109 @@ async def verify_utxo_with_metadata(
 | `maker/coinjoin.py` | Extended `!auth` parsing, extended `!ioauth` response |
 | `taker/podle.py` | `ExtendedPoDLECommitment` with metadata |
 | `taker/taker.py` | Extended `!auth` sending, extended `!ioauth` parsing |
+
+---
+
+## Neutrino Transaction Verification
+
+### Overview
+
+After broadcasting a CoinJoin transaction, the taker must verify that the transaction was successfully broadcast. Traditional full node backends use `get_transaction(txid)` to check mempool/blockchain, but Neutrino light clients cannot fetch arbitrary transactions by txid—they can only query UTXOs for known addresses using compact block filters.
+
+### Solution: Universal Verification Method
+
+The `verify_tx_output()` method works across all backend types:
+
+- **Full Node Backends** (Bitcoin Core, Mempool API): Use `get_transaction(txid)` as before
+- **Neutrino Backend**: Use address-based UTXO lookup via `/v1/utxo/{txid}/{vout}?address=...&start_height=...`
+
+### Implementation
+
+**Backend Interface** (`jmwallet/backends/base.py`):
+```python
+async def verify_tx_output(
+    self,
+    txid: str,
+    vout: int,
+    address: str,
+    start_height: int | None = None,
+) -> bool:
+    """Verify that a specific transaction output exists (was broadcast)."""
+    tx = await self.get_transaction(txid)
+    return tx is not None
+```
+
+**Neutrino Override** (`jmwallet/backends/neutrino.py`):
+```python
+async def verify_tx_output(
+    self,
+    txid: str,
+    vout: int,
+    address: str,
+    start_height: int | None = None,
+) -> bool:
+    """Verify output exists using neutrino's UTXO endpoint."""
+    params: dict[str, str | int] = {"address": address}
+    if start_height is not None:
+        params["start_height"] = start_height
+
+    result = await self._api_call("GET", f"v1/utxo/{txid}/{vout}", params=params)
+    return result is not None  # Even spent outputs confirm broadcast
+```
+
+**Taker Broadcast Verification** (`taker/taker.py`):
+
+The taker stores `cj_destination` during transaction building, finds the CJ output index from `tx_metadata`, and verifies both CJ and change outputs after broadcast:
+
+```python
+# In _broadcast_via_maker()
+verified = await self.backend.verify_tx_output(
+    txid=expected_txid,
+    vout=taker_cj_vout,
+    address=self.cj_destination,
+    start_height=current_height,  # Optimization for Neutrino
+)
+```
+
+### Broadcast Policy & Fallback
+
+Taker broadcast policies (configured via `tx_broadcast`):
+
+| Option | Behavior | Fallback on Failure |
+|--------|----------|---------------------|
+| `self` | Always broadcast via taker's node | N/A (no fallback needed) |
+| `random-peer` | Random selection (makers + taker) | Falls back to self-broadcast |
+| `not-self` | Random maker only | No fallback; manual broadcast required |
+
+If maker broadcast fails verification within timeout, the taker follows the policy's fallback behavior.
+
+### Neutrino API Reference
+
+```
+GET /v1/utxo/{txid}/{vout}?address={address}&start_height={height}
+```
+
+**Response (unspent)**:
+```json
+{"unspent": true, "value": 11516, "scriptpubkey": "0014..."}
+```
+
+**Response (spent)**:
+```json
+{"unspent": false, "spending_txid": "a1b2c3...", "spending_input": 0, "spending_height": 928820}
+```
+
+**Response (non-existent)**: HTTP 404
+
+Both unspent and spent responses confirm the transaction was broadcast—only 404 indicates failure.
+
+### Benefits
+
+1. **Universal Compatibility**: Works with all backend types without special cases
+2. **Neutrino Support**: Enables light clients to verify broadcasts using address-based lookups
+3. **Privacy-Preserving**: Uses compact filters (BIP157/158) without revealing full address set
+4. **Backward Compatible**: No protocol changes; works with existing makers
+5. **Proper Verification**: Confirms actual broadcast, not just `!push` delivery
 
 ---
 
@@ -1101,7 +1206,7 @@ For E2E tests, see the [E2E README](./tests/e2e/README.md).
 2. **Rate Limiting**: Per-peer message limits (token bucket, configurable via `message_rate_limit`)
 3. **Validation**: Protocol enforcement, input validation
 4. **Network Segregation**: Mainnet/testnet isolation
-5. **Authentication**: Handshake protocol, nick-based version detection
+5. **Authentication**: Handshake protocol, feature-based capability detection
 
 ### Directory Server Threat Model
 

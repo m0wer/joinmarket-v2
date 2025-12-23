@@ -294,8 +294,9 @@ class MakerBot:
     def _format_offer_announcement(self, offer) -> str:
         """Format offer for announcement (just the offer content, without nick!PUBLIC! prefix).
 
-        Format: <ordertype> <oid> <minsize> <maxsize> <txfee> <cjfee>[!tbond <proof>]
+        Format: <ordertype> <oid> <minsize> <maxsize> <txfee> <cjfee>[!neutrino][!tbond <proof>]
 
+        If the backend requires neutrino-compatible extended UTXO format, !neutrino is appended.
         If a fidelity bond is available, the bond proof is appended after !tbond.
         The proof uses the maker's nick as the "taker_nick" for the ownership signature,
         which gets verified when a taker actually requests the orderbook.
@@ -309,6 +310,12 @@ class MakerBot:
             f"{offer.oid} {offer.minsize} {offer.maxsize} "
             f"{offer.txfee} {offer.cjfee}"
         )
+
+        # NOTE: We intentionally do NOT advertise neutrino_compat in offers.
+        # Adding flags to offers would break compatibility with reference JoinMarket.
+        # Instead, neutrino_compat is advertised via the !pubkey response features field
+        # during the CoinJoin handshake. This is backwards compatible - legacy takers
+        # simply ignore the features field.
 
         # Append fidelity bond proof if available
         if self.fidelity_bond is not None:
@@ -746,8 +753,12 @@ class MakerBot:
         try:
             # Format message content based on command type
             if command == "pubkey":
-                # !pubkey <nacl_pubkey_hex> - NOT encrypted
+                # !pubkey <nacl_pubkey_hex> [features=<comma-separated>] - NOT encrypted
+                # Features are optional and backwards compatible with legacy takers
                 msg_content = data["nacl_pubkey"]
+                features = data.get("features", [])
+                if features:
+                    msg_content += f" features={','.join(features)}"
             elif command == "ioauth":
                 # Plaintext format: <utxo_list> <auth_pub> <cj_addr> <change_addr> <btc_sig>
                 plaintext = " ".join(

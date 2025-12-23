@@ -158,6 +158,35 @@ class BlockchainBackend(ABC):
         """
         return False
 
+    async def verify_tx_output(
+        self,
+        txid: str,
+        vout: int,
+        address: str,
+        start_height: int | None = None,
+    ) -> bool:
+        """
+        Verify that a specific transaction output exists (was broadcast and confirmed).
+
+        This is useful for verifying a transaction was successfully broadcast when
+        we know at least one of its output addresses (e.g., our coinjoin destination).
+
+        For full node backends, this uses get_transaction().
+        For light clients (neutrino), this uses UTXO lookup with the address hint.
+
+        Args:
+            txid: Transaction ID to verify
+            vout: Output index to check
+            address: The address that should own this output
+            start_height: Optional block height hint for light clients (improves performance)
+
+        Returns:
+            True if the output exists (transaction was broadcast), False otherwise
+        """
+        # Default implementation for full node backends
+        tx = await self.get_transaction(txid)
+        return tx is not None
+
     async def close(self) -> None:
         """Close backend connection"""
         pass

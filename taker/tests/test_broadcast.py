@@ -88,6 +88,8 @@ class TestTakerBroadcast:
         backend = MagicMock()
         backend.broadcast_transaction = AsyncMock(return_value="txid123")
         backend.get_transaction = AsyncMock(return_value=None)
+        backend.get_block_height = AsyncMock(return_value=850000)  # Mock current block height
+        backend.verify_tx_output = AsyncMock(return_value=False)  # Default: verification fails
         backend.requires_neutrino_metadata = MagicMock(return_value=False)
         return backend
 
@@ -234,16 +236,23 @@ class TestTakerBroadcast:
         taker.directory_client = MagicMock()
         taker.directory_client.send_privmsg = AsyncMock()
 
-        # Mock backend to return transaction (indicating broadcast success)
-        mock_tx_info = MagicMock()
-        mock_tx_info.raw = taker.final_tx.hex()
-        taker.backend.get_transaction = AsyncMock(return_value=mock_tx_info)
+        # Set up tx_metadata with taker's CJ and change outputs (required for verification)
+        taker.tx_metadata = {
+            "output_owners": [("taker", "cj"), ("J5maker123", "cj"), ("taker", "change")]
+        }
+        taker.cj_destination = "bcrt1qtest123"
+        taker.taker_change_address = "bcrt1qchange456"
+
+        # Mock backend to return verification success for both outputs
+        taker.backend.verify_tx_output = AsyncMock(return_value=True)
 
         tx_b64 = base64.b64encode(taker.final_tx).decode("ascii")
         txid = await taker._broadcast_via_maker("J5maker123", tx_b64)
 
         # Should detect the transaction
         assert txid != ""
+        # Should verify both CJ and change outputs
+        assert taker.backend.verify_tx_output.call_count >= 2
 
     @pytest.mark.asyncio
     async def test_phase_broadcast_random_peer_tries_makers(self, taker) -> None:
@@ -271,8 +280,12 @@ class TestTakerBroadcast:
         taker.directory_client = MagicMock()
         taker.directory_client.send_privmsg = AsyncMock()
 
-        # Make maker broadcast "fail" so we fall back to self
-        taker.backend.get_transaction = AsyncMock(return_value=None)
+        # Set up tx_metadata so verification can find output index
+        taker.tx_metadata = {"output_owners": [("taker", "cj"), ("J5maker123", "cj")]}
+        taker.cj_destination = "bcrt1qtest123"
+
+        # Make maker broadcast "fail" (verification returns False) so we fall back to self
+        taker.backend.verify_tx_output = AsyncMock(return_value=False)
 
         # Force deterministic order: maker first, then self
         with patch("random.shuffle", side_effect=lambda x: x.sort()):
@@ -307,8 +320,12 @@ class TestTakerBroadcast:
         taker.directory_client = MagicMock()
         taker.directory_client.send_privmsg = AsyncMock()
 
-        # Make broadcast fail
-        taker.backend.get_transaction = AsyncMock(return_value=None)
+        # Set up tx_metadata so verification can find output index
+        taker.tx_metadata = {"output_owners": [("taker", "cj"), ("J5maker123", "cj")]}
+        taker.cj_destination = "bcrt1qtest123"
+
+        # Make broadcast fail (verification returns False)
+        taker.backend.verify_tx_output = AsyncMock(return_value=False)
 
         txid = await taker._phase_broadcast()
 

@@ -352,7 +352,12 @@ class TestOrderbookManager:
 
 
 class TestFilterOffersByNickVersion:
-    """Tests for filtering offers by nick version (for neutrino takers)."""
+    """Tests for filtering offers by nick version (reserved for future reference compat).
+
+    NOTE: Nick version filtering is NOT used for neutrino detection - that uses
+    handshake features instead. These tests ensure the filter logic works correctly
+    for potential future reference implementation compatibility.
+    """
 
     @pytest.fixture
     def mixed_version_offers(self) -> list[Offer]:
@@ -402,15 +407,15 @@ class TestFilterOffersByNickVersion:
     def test_filter_min_version(
         self, mixed_version_offers: list[Offer], max_cj_fee: MaxCjFee
     ) -> None:
-        """Test min_nick_version filtering (tests reference compat with hypothetical J6)."""
-        # In our implementation all makers use J5, but filter logic remains for reference compat
+        """Test min_nick_version filtering (for potential future reference compat)."""
+        # In our implementation all makers use v5, but filter logic remains for future compat
         eligible = filter_offers(
             offers=mixed_version_offers,
             cj_amount=100_000,
             max_cj_fee=max_cj_fee,
-            min_nick_version=6,  # Would filter for J6 makers if they existed
+            min_nick_version=6,  # Would filter for hypothetical future nick versions
         )
-        # All our test makers are J5, so none pass the J6 filter
+        # All our test makers are J5, so none pass
         assert len(eligible) == 0
 
     def test_choose_orders_with_version_filter(

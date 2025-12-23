@@ -4,7 +4,7 @@ A maker (yield generator) bot for JoinMarket CoinJoin transactions. Makers provi
 
 ## Features
 
-- Protocol-compatible with JoinMarket v6 (Neutrino-compatible)
+- Protocol v5 compatible with reference JoinMarket and Neutrino backends
 - Fidelity bond support for improved offer visibility
 - PoDLE verification (anti-sybil protection)
 - Transaction verification (prevents loss of funds)

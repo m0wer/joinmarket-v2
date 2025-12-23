@@ -354,18 +354,22 @@ class TestPeerSupportsNeutrinoCompat:
 
 
 class TestNickVersionDetection:
-    """Tests for nick-based version detection functions."""
+    """Tests for nick-based version detection functions.
+
+    NOTE: Nick version detection is reserved for potential future reference compatibility.
+    Feature detection (like neutrino_compat) uses handshake features, not nick versions.
+    """
 
     def test_get_nick_version_v5(self):
         """Detect version 5 from J5 nick."""
         assert get_nick_version("J5abc123defOOOO") == 5
 
     def test_get_nick_version_v6(self):
-        """Detect hypothetical future J6 from nick (for reference compat)."""
+        """Detect hypothetical future version from nick (reserved for future compat)."""
         assert get_nick_version("J6xyz789ghiOOOO") == 6
 
     def test_get_nick_version_v7(self):
-        """Detect hypothetical future J7 from nick."""
+        """Detect hypothetical future version from nick."""
         assert get_nick_version("J7future123OOOO") == 7
 
     def test_get_nick_version_empty(self):

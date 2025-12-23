@@ -4,7 +4,7 @@ A taker (CoinJoin initiator) client for JoinMarket privacy-enhancing transaction
 
 ## Features
 
-- Protocol-compatible with JoinMarket v6 (Neutrino-compatible)
+- Protocol v5 compatible with reference JoinMarket and Neutrino backends
 - Smart maker selection with fidelity bond weighting
 - PoDLE commitment generation (anti-sybil)
 - Transaction building with input/output shuffling for privacy

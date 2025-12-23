@@ -318,40 +318,72 @@ class NeutrinoBackend(BlockchainBackend):
         """
         Get transaction by txid.
 
-        Neutrino fetches full blocks when needed (for relevant transactions).
+        Note: Neutrino uses compact block filters (BIP158) and can only fetch
+        transactions for addresses it has rescanned. It cannot fetch arbitrary
+        transactions by txid alone. This method always returns None.
+
+        For verification after broadcast, rely on UTXO checks with known addresses
+        and block heights instead.
+        """
+        # Neutrino doesn't support fetching arbitrary transactions by txid
+        # It can only work with UTXOs for known addresses via compact filters
+        return None
+
+    async def verify_tx_output(
+        self,
+        txid: str,
+        vout: int,
+        address: str,
+        start_height: int | None = None,
+    ) -> bool:
+        """
+        Verify that a specific transaction output exists using neutrino's UTXO endpoint.
+
+        Uses GET /v1/utxo/{txid}/{vout}?address=...&start_height=... to check if
+        the output exists. This works because neutrino uses compact block filters
+        that can match on addresses.
+
+        Args:
+            txid: Transaction ID to verify
+            vout: Output index to check
+            address: The address that should own this output
+            start_height: Block height hint for efficient scanning (recommended)
+
+        Returns:
+            True if the output exists, False otherwise
         """
         try:
+            params: dict[str, str | int] = {"address": address}
+            if start_height is not None:
+                params["start_height"] = start_height
+
             result = await self._api_call(
                 "GET",
-                f"v1/tx/{txid}",
+                f"v1/utxo/{txid}/{vout}",
+                params=params,
             )
 
-            if not result or "txid" not in result:
-                return None
+            # If we got a response with unspent status, the output exists
+            # Note: Even spent outputs confirm the transaction was broadcast
+            if result is not None:
+                logger.debug(
+                    f"Verified tx output {txid}:{vout} exists "
+                    f"(unspent={result.get('unspent', 'unknown')})"
+                )
+                return True
 
-            tip_height = await self.get_block_height()
-            block_height = result.get("block_height")
-            confirmations = 0
-
-            if block_height and block_height > 0:
-                confirmations = tip_height - block_height + 1
-
-            return Transaction(
-                txid=result["txid"],
-                raw=result.get("hex", ""),
-                confirmations=confirmations,
-                block_height=block_height,
-                block_time=result.get("block_time"),
-            )
+            return False
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                return None
-            logger.warning(f"Failed to fetch transaction {txid}: {e}")
-            return None
+                # Output not found
+                logger.debug(f"Tx output {txid}:{vout} not found")
+                return False
+            logger.warning(f"Error verifying tx output {txid}:{vout}: {e}")
+            return False
         except Exception as e:
-            logger.warning(f"Failed to fetch transaction {txid}: {e}")
-            return None
+            logger.warning(f"Error verifying tx output {txid}:{vout}: {e}")
+            return False
 
     async def estimate_fee(self, target_blocks: int) -> int:
         """
