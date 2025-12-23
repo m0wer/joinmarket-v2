@@ -117,52 +117,68 @@ class DirectoryServer:
 
     async def _perform_handshake(self, connection: TCPConnection, conn_id: str) -> str | None:
         try:
+            logger.trace(f"[{conn_id}] Waiting for handshake message...")
             data = await asyncio.wait_for(connection.receive(), timeout=30.0)
+            logger.trace(f"[{conn_id}] Received {len(data)} bytes: {data[:200]!r}...")
+
             envelope = MessageEnvelope.from_bytes(
                 data,
                 max_line_length=self.settings.max_line_length,
                 max_json_nesting_depth=self.settings.max_json_nesting_depth,
             )
+            logger.trace(
+                f"[{conn_id}] Parsed envelope: type={envelope.message_type}, payload_len={len(envelope.payload)}"
+            )
 
             if envelope.message_type != MessageType.HANDSHAKE:
-                logger.warning(f"Expected handshake, got {envelope.message_type}")
+                logger.warning(f"[{conn_id}] Expected handshake, got {envelope.message_type}")
                 return None
 
+            logger.trace(f"[{conn_id}] Processing handshake payload: {envelope.payload[:200]}")
             peer_info, response = self.handshake_handler.process_handshake(
                 envelope.payload, conn_id
+            )
+            logger.trace(
+                f"[{conn_id}] Handshake processed: peer_nick={peer_info.nick}, location={peer_info.location_string}"
             )
 
             response_envelope = MessageEnvelope(
                 message_type=MessageType.DN_HANDSHAKE, payload=json.dumps(response)
             )
             response_bytes = response_envelope.to_bytes()
+            logger.trace(f"[{conn_id}] Sending handshake response: {len(response_bytes)} bytes")
+            logger.trace(f"[{conn_id}] Response content: {response_bytes[:200]!r}...")
+
             try:
                 await connection.send(response_bytes)
+                logger.trace(f"[{conn_id}] Handshake response sent successfully")
                 # Small delay to let client process the handshake response
                 await asyncio.sleep(0.05)
             except Exception as e:
-                logger.error(f"Failed to send handshake response: {e}")
+                logger.error(f"[{conn_id}] Failed to send handshake response: {e}")
                 raise
 
             peer_location = peer_info.location_string
             self.peer_registry.register(peer_info)
+            logger.trace(f"[{conn_id}] Peer registered in registry")
 
             peer_key = peer_info.nick if peer_location == "NOT-SERVING-ONION" else peer_location
             self.peer_registry.update_status(peer_key, PeerStatus.HANDSHAKED)
             self.peer_key_to_conn_id[peer_key] = conn_id
+            logger.trace(f"[{conn_id}] Peer key mapped: {peer_key}")
 
-            logger.trace(f"Handshake complete for {peer_key} (nick={peer_info.nick})")
+            logger.trace(f"[{conn_id}] Handshake complete for {peer_key} (nick={peer_info.nick})")
 
             return peer_key
 
         except HandshakeError as e:
-            logger.warning(f"Handshake failed for {conn_id}: {e}")
+            logger.warning(f"[{conn_id}] Handshake failed: {e}")
             return None
         except TimeoutError:
-            logger.warning(f"Handshake timeout for {conn_id}")
+            logger.warning(f"[{conn_id}] Handshake timeout (30s)")
             return None
         except Exception as e:
-            logger.error(f"Handshake error for {conn_id}: {e}")
+            logger.error(f"[{conn_id}] Handshake error: {e}", exc_info=True)
             return None
 
     async def _handle_peer_messages(

@@ -98,7 +98,7 @@ services:
     restart: unless-stopped
     environment:
       - NETWORK=testnet
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=DEBUG
       - PORT=5222
       - HOST=0.0.0.0
     ports:
@@ -123,7 +123,7 @@ services:
     restart: unless-stopped
     environment:
       - NETWORK=testnet
-      - LOG_LEVEL=INFO
+      - LOG_LEVEL=DEBUG
       - DIRECTORY_NODES=jm-directory:5222
     ports:
       - "8080:8000"
