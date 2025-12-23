@@ -468,42 +468,52 @@ class DirectoryClient:
                 for offer_type in offer_types:
                     if rest.startswith(offer_type):
                         try:
-                            rest_parts = rest.split(COMMAND_PREFIX, 1)
+                            # Split on '!' to extract flags (neutrino, tbond)
+                            # Format: sw0reloffer 0 750000 790107726787 500 0.001!neutrino!tbond <proof>
+                            # NOTE: !neutrino in offers is deprecated - primary detection is via
+                            # handshake features. This parsing is kept for backwards compatibility.
+                            rest_parts = rest.split(COMMAND_PREFIX)
                             offer_line = rest_parts[0]
                             bond_data = None
+                            neutrino_compat = False
 
-                            if len(rest_parts) > 1 and rest_parts[1].startswith("tbond "):
-                                bond_parts = rest_parts[1][6:].split()
-                                if bond_parts:
-                                    bond_proof_b64 = bond_parts[0]
-                                    # For PUBLIC announcements, maker uses their own nick
-                                    # as taker_nick when creating the proof
-                                    bond_data = parse_fidelity_bond_proof(
-                                        bond_proof_b64, from_nick, from_nick
-                                    )
-                                    if bond_data:
-                                        logger.debug(
-                                            f"Parsed fidelity bond from {from_nick}: "
-                                            f"txid={bond_data['utxo_txid'][:16]}..., "
-                                            f"locktime={bond_data['locktime']}"
+                            # Parse flags after the offer line (backwards compat for !neutrino)
+                            for flag_part in rest_parts[1:]:
+                                if flag_part.startswith("neutrino"):
+                                    neutrino_compat = True
+                                    logger.debug(f"Maker {from_nick} requires neutrino_compat")
+                                elif flag_part.startswith("tbond "):
+                                    bond_parts = flag_part[6:].split()
+                                    if bond_parts:
+                                        bond_proof_b64 = bond_parts[0]
+                                        # For PUBLIC announcements, maker uses their own nick
+                                        # as taker_nick when creating the proof
+                                        bond_data = parse_fidelity_bond_proof(
+                                            bond_proof_b64, from_nick, from_nick
                                         )
-
-                                        utxo_str = (
-                                            f"{bond_data['utxo_txid']}:{bond_data['utxo_vout']}"
-                                        )
-                                        if utxo_str not in bond_utxo_set:
-                                            bond_utxo_set.add(utxo_str)
-                                            bond = FidelityBond(
-                                                counterparty=from_nick,
-                                                utxo_txid=bond_data["utxo_txid"],
-                                                utxo_vout=bond_data["utxo_vout"],
-                                                locktime=bond_data["locktime"],
-                                                script=bond_data["utxo_pub"],
-                                                utxo_confirmations=0,
-                                                cert_expiry=bond_data["cert_expiry"],
-                                                fidelity_bond_data=bond_data,
+                                        if bond_data:
+                                            logger.debug(
+                                                f"Parsed fidelity bond from {from_nick}: "
+                                                f"txid={bond_data['utxo_txid'][:16]}..., "
+                                                f"locktime={bond_data['locktime']}"
                                             )
-                                            bonds.append(bond)
+
+                                            utxo_str = (
+                                                f"{bond_data['utxo_txid']}:{bond_data['utxo_vout']}"
+                                            )
+                                            if utxo_str not in bond_utxo_set:
+                                                bond_utxo_set.add(utxo_str)
+                                                bond = FidelityBond(
+                                                    counterparty=from_nick,
+                                                    utxo_txid=bond_data["utxo_txid"],
+                                                    utxo_vout=bond_data["utxo_vout"],
+                                                    locktime=bond_data["locktime"],
+                                                    script=bond_data["utxo_pub"],
+                                                    utxo_confirmations=0,
+                                                    cert_expiry=bond_data["cert_expiry"],
+                                                    fidelity_bond_data=bond_data,
+                                                )
+                                                bonds.append(bond)
 
                             offer_parts = offer_line.split()
                             if len(offer_parts) < 6:
@@ -532,6 +542,7 @@ class DirectoryClient:
                                 txfee=txfee,
                                 cjfee=cjfee,
                                 fidelity_bond_value=0,
+                                neutrino_compat=neutrino_compat,
                             )
                             offers.append(offer)
 
@@ -541,7 +552,7 @@ class DirectoryClient:
                             logger.info(
                                 f"Parsed {offer_type} from {from_nick}: "
                                 f"oid={oid}, size={minsize}-{maxsize}, fee={cjfee}, "
-                                f"has_bond={bond_data is not None}"
+                                f"has_bond={bond_data is not None}, neutrino_compat={neutrino_compat}"
                             )
                             parsed = True
                         except Exception as e:

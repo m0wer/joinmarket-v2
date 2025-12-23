@@ -42,7 +42,7 @@ def pytest_configure(config: pytest.Config) -> None:
     Docker profile markers (mutually exclusive):
     - docker: Base marker for any test requiring Docker services
     - e2e: Tests requiring 'docker compose --profile e2e' (our implementation)
-    - reference: Tests requiring 'docker compose --profile reference' (JAM compatibility)
+    - reference: Tests requiring 'docker compose --profile reference' (JAM web UI for reference JoinMarket)
     - neutrino: Tests requiring 'docker compose --profile neutrino' (light client)
     - reference_maker: Tests requiring 'docker compose --profile reference-maker'
 

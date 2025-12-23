@@ -81,7 +81,8 @@ def filter_offers(
         max_cj_fee: Fee limits
         ignored_makers: Set of maker nicks to exclude
         allowed_types: Set of allowed offer types (default: all sw0* types)
-        min_nick_version: Minimum required nick version (e.g., 6 for neutrino takers)
+        min_nick_version: Minimum nick version for reference compatibility (not used for
+            neutrino detection - that uses handshake features instead)
 
     Returns:
         List of eligible offers
@@ -100,7 +101,8 @@ def filter_offers(
             logger.debug(f"Ignoring offer from {offer.counterparty} (in ignored list)")
             continue
 
-        # Filter by nick version (if required - e.g., for specific compatibility needs)
+        # Filter by nick version (reserved for potential future reference compatibility)
+        # NOTE: This is NOT used for neutrino detection - that uses handshake features
         if min_nick_version is not None:
             nick_version = get_nick_version(offer.counterparty)
             if nick_version < min_nick_version:

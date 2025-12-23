@@ -15,6 +15,7 @@ Reference: Original joinmarket-clientserver/src/jmclient/taker.py
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -261,6 +262,8 @@ class Taker:
         self.final_tx: bytes = b""
         self.txid: str = ""
         self.selected_utxos: list[UTXOInfo] = []  # Taker's selected UTXOs for signing
+        self.cj_destination: str = ""  # Taker's CJ destination address for broadcast verification
+        self.taker_change_address: str = ""  # Taker's change address for broadcast verification
 
         # E2E encryption session for communication with makers
         self.crypto_session: CryptoSession | None = None
@@ -352,10 +355,9 @@ class Taker:
 
             # NOTE: Neutrino takers require makers that support extended UTXO metadata
             # (scriptPubKey + blockheight). This is negotiated during the CoinJoin handshake
-            # via the neutrino_compat feature flag, not by nick version. All makers in our
-            # implementation use J5 nicks and support this feature via feature flags.
-            # If a maker doesn't support the required features, the coinjoin will fail
-            # gracefully during the handshake phase.
+            # via the neutrino_compat feature in the !pubkey response. All peers use v5
+            # protocol; feature support is advertised separately for smooth rollout.
+            # Incompatible makers (no neutrino_compat) are filtered during _phase_auth().
             if self.backend.requires_neutrino_metadata():
                 logger.info("Neutrino backend: will negotiate neutrino_compat during handshake")
 
@@ -369,9 +371,10 @@ class Taker:
                 self.state = TakerState.FAILED
                 return None
 
-            # Initialize maker sessions
+            # Initialize maker sessions - neutrino_compat will be detected during handshake
+            # when we receive the !pubkey response with features field
             self.maker_sessions = {
-                nick: MakerSession(nick=nick, offer=offer)
+                nick: MakerSession(nick=nick, offer=offer, supports_neutrino_compat=False)
                 for nick, offer in selected_offers.items()
             }
 
@@ -493,19 +496,29 @@ class Taker:
         )
 
         # Process responses
-        # Maker sends !pubkey as plain hex: "<nacl_pubkey_hex> <signing_pubkey> <signature>"
-        # Directory client strips the command: "<nacl_pubkey_hex> <signing_pubkey> <sig>"
+        # Maker sends: "<nacl_pubkey> [features=...] <signing_pubkey> <signature>"
+        # Directory client strips command, we get the data part
         for nick in list(self.maker_sessions.keys()):
             if nick in responses:
                 try:
                     response_data = responses[nick]["data"].strip()
-                    # The response format is: "<nacl_pubkey_hex> <signing_pubkey> <signature>"
-                    # We just need the first part (nacl_pubkey_hex)
+                    # Format: "<nacl_pubkey_hex> [features=...] <signing_pk> <sig>"
+                    # We need the first part (nacl_pubkey_hex) and optionally features
                     parts = response_data.split()
                     if parts:
                         nacl_pubkey = parts[0]
                         self.maker_sessions[nick].pubkey = nacl_pubkey
                         self.maker_sessions[nick].responded_fill = True
+
+                        # Parse optional features (e.g., "features=neutrino_compat")
+                        for part in parts[1:]:
+                            if part.startswith("features="):
+                                features_str = part[9:]  # Skip "features="
+                                features = set(features_str.split(",")) if features_str else set()
+                                if "neutrino_compat" in features:
+                                    self.maker_sessions[nick].supports_neutrino_compat = True
+                                    logger.debug(f"Maker {nick} supports neutrino_compat")
+                                break
 
                         # Set up encryption session with this maker using their NaCl pubkey
                         # IMPORTANT: Reuse the same keypair from self.crypto_session
@@ -542,23 +555,46 @@ class Taker:
             return False
 
         # Send !auth to each maker with format based on their feature support.
-        # - Makers with neutrino_compat: Send extended format (txid:vout:scriptpubkey:blockheight)
-        # - Legacy makers: Send legacy format (txid:vout)
+        # - Makers with neutrino_compat: MUST receive extended format
+        #   (txid:vout:scriptpubkey:blockheight)
+        # - Legacy makers: Receive legacy format (txid:vout)
         #
-        # Feature detection happens during !pubkey phase - if maker's !pubkey includes
-        # neutrino_compat feature, we use extended format. This ensures compatibility
-        # with both our implementation and the reference JAM implementation.
+        # Feature detection happens via handshake - makers advertise neutrino_compat
+        # in their !pubkey response's features field. This is backwards compatible:
+        # legacy JoinMarket makers don't send features, so they default to legacy format.
+        #
+        # Compatibility matrix:
+        # | Taker Backend | Maker neutrino_compat | Action |
+        # |---------------|----------------------|--------|
+        # | Full node     | False                | Send legacy format |
+        # | Full node     | True                 | Send extended format (maker requires it) |
+        # | Neutrino      | False                | FAIL - incompatible, maker filtered out |
+        # | Neutrino      | True                 | Send extended format (both support it) |
         has_metadata = self.podle_commitment.has_neutrino_metadata()
+        taker_requires_extended = self.backend.requires_neutrino_metadata()
 
-        for nick, session in self.maker_sessions.items():
+        for nick, session in list(self.maker_sessions.items()):
             if session.crypto is None:
                 logger.error(f"No encryption session for {nick}")
                 continue
 
-            # Determine format based on maker's feature support
-            # For now, assume all makers support neutrino_compat if we need it
-            # TODO: Track maker features from handshake/!pubkey response
-            use_extended = has_metadata and self.backend.requires_neutrino_metadata()
+            maker_requires_extended = session.supports_neutrino_compat
+
+            # Fail early if taker needs extended format but maker doesn't support it
+            # This happens when taker uses Neutrino backend but maker uses full node
+            # The maker won't be able to verify our UTXO without extended metadata
+            if taker_requires_extended and not maker_requires_extended:
+                logger.error(
+                    f"Incompatible maker {nick}: taker uses Neutrino backend but maker "
+                    f"doesn't support neutrino_compat. Maker cannot verify our UTXOs."
+                )
+                del self.maker_sessions[nick]
+                continue
+
+            # Send extended format if:
+            # 1. We have the metadata AND
+            # 2. Either maker requires it OR we (taker) need it for our verification
+            use_extended = has_metadata and (maker_requires_extended or taker_requires_extended)
             revelation = self.podle_commitment.to_revelation(extended=use_extended)
 
             # Create pipe-separated revelation format:
@@ -582,6 +618,14 @@ class Taker:
             # Encrypt and send
             encrypted_revelation = session.crypto.encrypt(revelation_str)
             await self.directory_client.send_privmsg(nick, "!auth", encrypted_revelation)
+
+        # Check if we still have enough makers after filtering incompatible ones
+        if len(self.maker_sessions) < self.config.minimum_makers:
+            logger.error(
+                f"Not enough compatible makers: {len(self.maker_sessions)} "
+                f"< {self.config.minimum_makers}. Neutrino takers require neutrino_compat."
+            )
+            return False
 
         # Wait for all !ioauth responses at once
         timeout = self.config.maker_timeout_sec
@@ -791,6 +835,9 @@ class Taker:
     async def _phase_build_tx(self, destination: str, mixdepth: int) -> bool:
         """Build the unsigned CoinJoin transaction."""
         try:
+            # Store destination for broadcast verification
+            self.cj_destination = destination
+
             # Get taker's UTXOs
             taker_utxos = await self.wallet.get_utxos(mixdepth)
 
@@ -819,9 +866,10 @@ class Taker:
 
             taker_total = sum(u.value for u in selected_utxos)
 
-            # Taker change address
+            # Taker change address - store for broadcast verification
             change_index = self.wallet.get_next_address_index(mixdepth, 1)
             taker_change_address = self.wallet.get_change_address(mixdepth, change_index)
+            self.taker_change_address = taker_change_address
 
             # Build maker data
             maker_data = {}
@@ -869,6 +917,38 @@ class Taker:
         vsize = num_inputs * 68 + num_outputs * 31 + 11
         fee_rate = 10  # sat/vbyte, should come from backend
         return int(vsize * fee_rate * self.config.tx_fee_factor)
+
+    def _get_taker_cj_output_index(self) -> int | None:
+        """
+        Find the index of the taker's CoinJoin output in the transaction.
+
+        Uses tx_metadata["output_owners"] which tracks (owner, type) for each output.
+        The taker's CJ output is marked as ("taker", "cj").
+
+        Returns:
+            Output index (vout) or None if not found
+        """
+        output_owners = self.tx_metadata.get("output_owners", [])
+        for idx, (owner, out_type) in enumerate(output_owners):
+            if owner == "taker" and out_type == "cj":
+                return idx
+        return None
+
+    def _get_taker_change_output_index(self) -> int | None:
+        """
+        Find the index of the taker's change output in the transaction.
+
+        Uses tx_metadata["output_owners"] which tracks (owner, type) for each output.
+        The taker's change output is marked as ("taker", "change").
+
+        Returns:
+            Output index (vout) or None if not found
+        """
+        output_owners = self.tx_metadata.get("output_owners", [])
+        for idx, (owner, out_type) in enumerate(output_owners):
+            if owner == "taker" and out_type == "change":
+                return idx
+        return None
 
     async def _phase_collect_signatures(self) -> bool:
         """Send !tx and collect !sig responses from makers."""
@@ -1151,6 +1231,10 @@ class Taker:
         Sends !push command and waits briefly for the transaction to appear.
         We don't expect a response from the maker - they broadcast unquestioningly.
 
+        Verification is done using verify_tx_output() which works with all backends
+        including Neutrino (which can't fetch arbitrary transactions by txid).
+        We verify both CJ and change outputs for extra confidence.
+
         Args:
             maker_nick: The maker's nick to send the push request to
             tx_b64: Base64-encoded signed transaction
@@ -1159,48 +1243,109 @@ class Taker:
             Transaction ID if broadcast detected, empty string otherwise
         """
         try:
+            start_time = time.time()
             logger.info(f"Requesting broadcast via maker: {maker_nick}")
 
             # Send !push to the maker (unencrypted, like reference implementation)
             await self.directory_client.send_privmsg(maker_nick, "!push", tx_b64)
 
-            # Wait briefly and check if the transaction was broadcast
-            # We poll mempool/blockchain for the transaction
+            # Wait and check if the transaction was broadcast
             await asyncio.sleep(2)  # Give maker time to broadcast
 
-            # Check if transaction is now visible
-            # Calculate the expected txid from the raw transaction (excluding witness data)
+            # Calculate the expected txid
             from taker.tx_builder import CoinJoinTxBuilder
 
             builder = CoinJoinTxBuilder(self.config.bitcoin_network or self.config.network)
             expected_txid = builder.get_txid(self.final_tx)
 
-            # Try to get the transaction from our backend
+            # Get current block height for Neutrino optimization
             try:
-                tx_info = await self.backend.get_transaction(expected_txid)
-                if tx_info:
-                    logger.info(
-                        f"Transaction broadcast via {maker_nick} confirmed: {expected_txid}"
-                    )
-                    return expected_txid
-            except Exception:
-                # Transaction not yet visible
-                pass
+                current_height = await self.backend.get_block_height()
+            except Exception as e:
+                logger.debug(f"Could not get block height: {e}, proceeding without hint")
+                current_height = None
 
-            # Wait a bit more and try again
+            # Get taker's CJ output index for verification
+            taker_cj_vout = self._get_taker_cj_output_index()
+            if taker_cj_vout is None:
+                logger.warning("Could not find taker CJ output index for verification")
+                # Can't verify without output index - treat as unverified failure
+                return ""
+
+            # Also get change output for additional verification
+            taker_change_vout = self._get_taker_change_output_index()
+
+            # Verify the transaction was broadcast by checking our CJ output exists
+            # This works with all backends including Neutrino (uses address-based lookup)
+            verify_start = time.time()
+            cj_verified = await self.backend.verify_tx_output(
+                txid=expected_txid,
+                vout=taker_cj_vout,
+                address=self.cj_destination,
+                start_height=current_height,
+            )
+            verify_time = time.time() - verify_start
+
+            # Also verify change output if it exists (extra confidence)
+            change_verified = True  # Default to True if no change output
+            if taker_change_vout is not None and self.taker_change_address:
+                change_verify_start = time.time()
+                change_verified = await self.backend.verify_tx_output(
+                    txid=expected_txid,
+                    vout=taker_change_vout,
+                    address=self.taker_change_address,
+                    start_height=current_height,
+                )
+                change_verify_time = time.time() - change_verify_start
+                logger.debug(
+                    f"Change output verification: {change_verified} "
+                    f"(took {change_verify_time:.2f}s)"
+                )
+
+            if cj_verified and change_verified:
+                total_time = time.time() - start_time
+                logger.info(
+                    f"Transaction broadcast via {maker_nick} confirmed: {expected_txid} "
+                    f"(CJ verify: {verify_time:.2f}s, total: {total_time:.2f}s)"
+                )
+                return expected_txid
+
+            # Wait longer and try once more
             await asyncio.sleep(self.config.broadcast_timeout_sec - 2)
 
-            try:
-                tx_info = await self.backend.get_transaction(expected_txid)
-                if tx_info:
-                    logger.info(
-                        f"Transaction broadcast via {maker_nick} confirmed: {expected_txid}"
-                    )
-                    return expected_txid
-            except Exception:
-                pass
+            verify_start = time.time()
+            cj_verified = await self.backend.verify_tx_output(
+                txid=expected_txid,
+                vout=taker_cj_vout,
+                address=self.cj_destination,
+                start_height=current_height,
+            )
+            verify_time = time.time() - verify_start
 
-            logger.warning(f"Broadcast via {maker_nick} not confirmed within timeout")
+            # Verify change output again if it exists
+            if taker_change_vout is not None and self.taker_change_address:
+                change_verified = await self.backend.verify_tx_output(
+                    txid=expected_txid,
+                    vout=taker_change_vout,
+                    address=self.taker_change_address,
+                    start_height=current_height,
+                )
+
+            if cj_verified and change_verified:
+                total_time = time.time() - start_time
+                logger.info(
+                    f"Transaction broadcast via {maker_nick} confirmed: {expected_txid} "
+                    f"(CJ verify: {verify_time:.2f}s, total: {total_time:.2f}s)"
+                )
+                return expected_txid
+
+            # Could not verify broadcast
+            total_time = time.time() - start_time
+            logger.debug(
+                f"Could not confirm broadcast via {maker_nick} - "
+                f"CJ output {expected_txid}:{taker_cj_vout} verified={cj_verified}, "
+                f"change output verified={change_verified} (took {total_time:.2f}s)"
+            )
             return ""
 
         except Exception as e:

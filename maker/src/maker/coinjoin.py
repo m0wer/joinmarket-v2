@@ -146,13 +146,19 @@ class CoinJoinSession:
                 logger.error(f"Failed to set up encryption with taker: {e}")
                 return False, {"error": f"Invalid taker pubkey: {e}"}
 
-            # Return our NaCl pubkey for E2E encryption setup
-            # Format for !pubkey: just the hex pubkey string
+            # Return our NaCl pubkey and features for E2E encryption setup
+            # Format for !pubkey: <nacl_pubkey_hex> [features=<comma-separated>]
+            # Features are optional - legacy peers won't send them
             nacl_pubkey = self.crypto.get_pubkey_hex()
 
             self.state = CoinJoinState.PUBKEY_SENT
 
-            return True, {"nacl_pubkey": nacl_pubkey}
+            # Include features in the response
+            # neutrino_compat: We support extended UTXO format (txid:vout:scriptpubkey:blockheight)
+            # All modern makers can accept extended format (extra fields are simply ignored)
+            features: list[str] = ["neutrino_compat"]
+
+            return True, {"nacl_pubkey": nacl_pubkey, "features": features}
 
         except Exception as e:
             logger.error(f"Failed to handle !fill: {e}")

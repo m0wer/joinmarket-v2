@@ -5,7 +5,7 @@ Feature Flag System
 ===================
 This implementation uses feature flags for capability negotiation instead of
 protocol version bumping. This allows incremental feature adoption while
-maintaining full compatibility with the reference implementation (JAM).
+maintaining full compatibility with the reference implementation from joinmarket-clientserver.
 
 Features are advertised in the handshake `features` dict and negotiated
 per-CoinJoin session via extended !fill/!pubkey messages.

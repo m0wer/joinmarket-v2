@@ -28,23 +28,29 @@ All components are fully implemented. Future work will focus on improvements, op
 - Nostr relays for offer broadcasting
 - CoinJoinXT and Lightning Network integration: https://www.youtube.com/watch?v=YS0MksuMl9k
 
-### Compatibility Note
+### Compatibility & Feature Negotiation
 
-This implementation uses protocol v6 with extended UTXO format for Neutrino support. It is **fully backward-compatible** with the reference JoinMarket implementation (JAM) through nick-based version detection.
+This implementation uses protocol v5 and is **fully backward-compatible** with the reference JoinMarket implementation from [joinmarket-clientserver](https://github.com/JoinMarket-Org/joinmarket-clientserver/). New features like Neutrino support are negotiated via the **handshake features dict**, not protocol version bumps.
 
-**Version detection via nick format:**
-- J5xxx nicks: Protocol v5 (JAM compatible, legacy UTXO format)
-- J6xxx nicks: Protocol v6 (extended UTXO format for Neutrino)
+**Design principles:**
+- **Smooth rollout**: Features are adopted gradually without requiring network-wide upgrades
+- **No fragmentation**: All peers use protocol v5, avoiding version-based compatibility issues
+- **Backwards compatible**: New peers work seamlessly with existing JoinMarket makers and takers
+
+**Feature negotiation via handshake:**
+- During the CoinJoin handshake, peers exchange a features dict (e.g., `{"neutrino_compat": true}`)
+- Takers adapt their UTXO format based on maker capabilities
+- Legacy peers that don't advertise features receive legacy format
 
 **Compatibility matrix:**
-| Taker Backend | Maker Type | Status |
-|--------------|------------|--------|
-| Full node | J5 (JAM) | ✅ Works - sends legacy format |
-| Full node | J6 (ours) | ✅ Works - sends extended format |
-| Neutrino | J5 (JAM) | ❌ Not supported - auto-filtered |
-| Neutrino | J6 (ours) | ✅ Works - both use extended format |
+| Taker Backend | Maker Features | Status |
+|--------------|----------------|--------|
+| Full node | No `neutrino_compat` (legacy) | ✅ Works - sends legacy UTXO format |
+| Full node | Has `neutrino_compat` | ✅ Works - sends extended UTXO format |
+| Neutrino | No `neutrino_compat` (legacy) | ❌ Incompatible - taker filters out |
+| Neutrino | Has `neutrino_compat` | ✅ Works - both use extended format |
 
-Neutrino takers automatically filter out J5 makers during orderbook selection since they require the extended UTXO format that only v6 makers can provide.
+Neutrino takers automatically filter out makers that don't advertise `neutrino_compat` since they require extended UTXO metadata for verification.
 
 ## Project Structure
 
@@ -157,7 +163,7 @@ See individual component READMEs for detailed instructions:
 
 ## Docker
 
-The Docker compose file is designed for development and testing purposes. But is also a good reference. It provides all components and their dependencies including a Bitcoin Core regtest node and a Neutrino server. Optionally it also spins up Tor for the directory server hidden service and a Jam container for testing interoperability with the reference JoinMarket implementation.
+The Docker compose file is designed for development and testing purposes. But is also a good reference. It provides all components and their dependencies including a Bitcoin Core regtest node and a Neutrino server. Optionally it also spins up Tor for the directory server hidden service and a JAM (JoinMarket web UI) container for testing interoperability with the reference JoinMarket implementation.
 
 ## License
 

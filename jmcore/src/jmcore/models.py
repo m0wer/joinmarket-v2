@@ -216,6 +216,10 @@ class Offer(BaseModel):
     fidelity_bond_value: int = Field(default=0, ge=0)
     directory_node: str | None = None
     fidelity_bond_data: dict[str, Any] | None = None
+    neutrino_compat: bool = Field(
+        default=False,
+        description="Maker requires extended UTXO format (neutrino-compatible backend)",
+    )
 
     @field_validator("cjfee")
     @classmethod
