@@ -2,11 +2,13 @@
 Test fixtures and configuration.
 """
 
+from typing import Any
+
 import pytest
 
 
 @pytest.fixture
-def sample_offer_data() -> dict:
+def sample_offer_data() -> dict[str, Any]:
     return {
         "counterparty": "J5test",
         "oid": 0,
@@ -20,7 +22,7 @@ def sample_offer_data() -> dict:
 
 
 @pytest.fixture
-def sample_bond_data() -> dict:
+def sample_bond_data() -> dict[str, Any]:
     return {
         "counterparty": "J5test",
         "utxo": {

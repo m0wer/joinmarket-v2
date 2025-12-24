@@ -145,14 +145,14 @@ class OrderbookAggregator:
         self.current_orderbook: OrderBook = OrderBook()
         self._lock = asyncio.Lock()
         self.clients: dict[str, DirectoryClient] = {}
-        self.listener_tasks: list[asyncio.Task] = []
+        self.listener_tasks: list[asyncio.Task[Any]] = []
         self._bond_calculation_task: asyncio.Task[Any] | None = None
         self._bond_queue: asyncio.Queue[OrderBook] = asyncio.Queue()
         self._bond_cache: dict[str, FidelityBond] = {}
         self._last_offers_hash: int = 0
         self._mempool_semaphore = asyncio.Semaphore(5)
         self.node_statuses: dict[str, DirectoryNodeStatus] = {}
-        self._retry_tasks: list[asyncio.Task] = []
+        self._retry_tasks: list[asyncio.Task[Any]] = []
 
         for onion_address, port in directory_nodes:
             node_id = f"{onion_address}:{port}"
