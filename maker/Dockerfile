@@ -102,8 +102,6 @@ CMD ["sh", "-c", "\
     MNEMONIC_ARG=\"\"; \
     if [ -n \"${MNEMONIC_FILE}\" ]; then \
         MNEMONIC_ARG=\"--mnemonic-file ${MNEMONIC_FILE}\"; \
-    elif [ -n \"${MNEMONIC}\" ]; then \
-        MNEMONIC_ARG=\"--mnemonic ${MNEMONIC}\"; \
     fi; \
     DIRECTORY_ARG=\"\"; \
     if [ -n \"${DIRECTORY_SERVERS}\" ]; then \
