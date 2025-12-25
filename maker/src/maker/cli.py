@@ -155,19 +155,23 @@ def start(
         str | None, typer.Option(envvar="NEUTRINO_URL", help="Neutrino REST API URL")
     ] = None,
     min_size: Annotated[int, typer.Option(help="Minimum CoinJoin size in sats")] = 100_000,
-    offer_type: Annotated[
-        str,
-        typer.Option(
-            help="Offer type: sw0absoffer (absolute) or sw0reloffer (relative)",
-            envvar="OFFER_TYPE",
-        ),
-    ] = "sw0reloffer",
     cj_fee_relative: Annotated[
-        str, typer.Option(help="Relative coinjoin fee (e.g., 0.001 = 0.1%)")
-    ] = "0.001",
+        str | None,
+        typer.Option(
+            help=(
+                "Relative coinjoin fee (e.g., 0.001 = 0.1%). "
+                "Mutually exclusive with --cj-fee-absolute."
+            ),
+            envvar="CJ_FEE_RELATIVE",
+        ),
+    ] = None,
     cj_fee_absolute: Annotated[
-        int, typer.Option(help="Absolute coinjoin fee in sats (used with absolute offer type)")
-    ] = 500,
+        int | None,
+        typer.Option(
+            help="Absolute coinjoin fee in sats. Mutually exclusive with --cj-fee-relative.",
+            envvar="CJ_FEE_ABSOLUTE",
+        ),
+    ] = None,
     tx_fee_contribution: Annotated[int, typer.Option(help="Tx fee contribution in sats")] = 0,
     directory_servers: Annotated[
         list[str] | None,
@@ -176,6 +180,12 @@ def start(
             help="Directory servers host:port. Defaults to mainnet directory nodes.",
         ),
     ] = None,
+    tor_socks_host: Annotated[
+        str, typer.Option(envvar="TOR_SOCKS_HOST", help="Tor SOCKS proxy host")
+    ] = "127.0.0.1",
+    tor_socks_port: Annotated[
+        int, typer.Option(envvar="TOR_SOCKS_PORT", help="Tor SOCKS proxy port")
+    ] = 9050,
     fidelity_bond_locktimes: Annotated[
         list[int],
         typer.Option("--fidelity-bond-locktime", "-L", help="Fidelity bond locktimes to scan for"),
@@ -201,15 +211,34 @@ def start(
     # Use bitcoin_network for address generation, default to network if not specified
     actual_bitcoin_network = bitcoin_network or network
 
-    # Parse and validate offer type
-    try:
-        parsed_offer_type = OfferType(offer_type)
-    except ValueError:
+    # Auto-detect offer type based on which fee argument is provided
+    # Priority: explicit values > env vars > defaults
+    if cj_fee_relative is not None and cj_fee_absolute is not None:
         logger.error(
-            f"Invalid offer type: {offer_type}. "
-            "Valid options: sw0absoffer, sw0reloffer, swabsoffer, swreloffer"
+            "Cannot specify both --cj-fee-relative and --cj-fee-absolute. "
+            "Use only one to set the fee model."
         )
         raise typer.Exit(1)
+
+    # Determine offer type and fee values
+    if cj_fee_absolute is not None:
+        # User explicitly set absolute fee
+        parsed_offer_type = OfferType.SW0_ABSOLUTE
+        actual_cj_fee_relative = "0.001"  # Default for config, but won't be used
+        actual_cj_fee_absolute = cj_fee_absolute
+        logger.info(f"Using absolute fee: {cj_fee_absolute} sats")
+    elif cj_fee_relative is not None:
+        # User explicitly set relative fee
+        parsed_offer_type = OfferType.SW0_RELATIVE
+        actual_cj_fee_relative = cj_fee_relative
+        actual_cj_fee_absolute = 500  # Default for config, but won't be used
+        logger.info(f"Using relative fee: {cj_fee_relative}")
+    else:
+        # Neither specified - use relative as default
+        parsed_offer_type = OfferType.SW0_RELATIVE
+        actual_cj_fee_relative = "0.001"
+        actual_cj_fee_absolute = 500
+        logger.info("No fee specified, using default relative fee: 0.001 (0.1%)")
 
     # Resolve directory servers: use provided list or default for network
     resolved_directory_servers = (
@@ -236,10 +265,12 @@ def start(
         backend_type=backend_type,
         backend_config=backend_config,
         directory_servers=resolved_directory_servers,
+        socks_host=tor_socks_host,
+        socks_port=tor_socks_port,
         min_size=min_size,
         offer_type=parsed_offer_type,
-        cj_fee_relative=cj_fee_relative,
-        cj_fee_absolute=cj_fee_absolute,
+        cj_fee_relative=actual_cj_fee_relative,
+        cj_fee_absolute=actual_cj_fee_absolute,
         tx_fee_contribution=tx_fee_contribution,
         fidelity_bond_locktimes=list(fidelity_bond_locktimes),
     )

@@ -47,9 +47,14 @@ ENV BITCOIN_NETWORK=
 ENV LOG_LEVEL=INFO
 ENV MIN_SIZE=100000
 ENV TX_FEE_CONTRIBUTION=1000
-ENV CJ_FEE_RELATIVE=0.0002
-ENV CJ_FEE_ABSOLUTE=500
-ENV OFFER_TYPE=sw0reloffer
+
+# CoinJoin fee - set ONE of these (they are mutually exclusive):
+# CJ_FEE_RELATIVE: Percentage fee (e.g., 0.0002 = 0.02%)
+# CJ_FEE_ABSOLUTE: Fixed satoshi amount (e.g., 500)
+# If neither is set, defaults to CJ_FEE_RELATIVE=0.001 (0.1%)
+ENV CJ_FEE_RELATIVE=
+ENV CJ_FEE_ABSOLUTE=
+
 ENV BACKEND_TYPE=full_node
 
 # Tor settings (for connecting to directory servers)
@@ -104,6 +109,12 @@ CMD ["sh", "-c", "\
     if [ -n \"${DIRECTORY_SERVERS}\" ]; then \
         DIRECTORY_ARG=\"--directory-servers ${DIRECTORY_SERVERS}\"; \
     fi; \
+    FEE_ARG=\"\"; \
+    if [ -n \"${CJ_FEE_ABSOLUTE}\" ]; then \
+        FEE_ARG=\"--cj-fee-absolute ${CJ_FEE_ABSOLUTE}\"; \
+    elif [ -n \"${CJ_FEE_RELATIVE}\" ]; then \
+        FEE_ARG=\"--cj-fee-relative ${CJ_FEE_RELATIVE}\"; \
+    fi; \
     jm-maker start \
     ${MNEMONIC_ARG} \
     --network \"${NETWORK}\" \
@@ -114,9 +125,7 @@ CMD ["sh", "-c", "\
     --rpc-password \"${BITCOIN_RPC_PASSWORD}\" \
     --neutrino-url \"${NEUTRINO_URL}\" \
     --min-size \"${MIN_SIZE}\" \
-    --offer-type \"${OFFER_TYPE}\" \
-    --cj-fee-relative \"${CJ_FEE_RELATIVE}\" \
-    --cj-fee-absolute \"${CJ_FEE_ABSOLUTE}\" \
+    ${FEE_ARG} \
     --tx-fee-contribution \"${TX_FEE_CONTRIBUTION}\" \
     ${DIRECTORY_ARG} \
     ${FIDELITY_BOND_ARGS}"]

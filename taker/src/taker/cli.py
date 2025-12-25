@@ -167,6 +167,12 @@ def coinjoin(
             help="Directory servers (comma-separated). Defaults to mainnet directory nodes.",
         ),
     ] = None,
+    tor_socks_host: Annotated[
+        str, typer.Option(envvar="TOR_SOCKS_HOST", help="Tor SOCKS proxy host")
+    ] = "127.0.0.1",
+    tor_socks_port: Annotated[
+        int, typer.Option(envvar="TOR_SOCKS_PORT", help="Tor SOCKS proxy port")
+    ] = 9050,
     max_abs_fee: Annotated[
         int, typer.Option("--max-abs-fee", help="Max absolute fee in sats")
     ] = 500,
@@ -233,6 +239,8 @@ def coinjoin(
         backend_type=backend_type,
         backend_config=backend_config,
         directory_servers=dir_servers,
+        socks_host=tor_socks_host,
+        socks_port=tor_socks_port,
         destination_address=destination,
         amount=amount,
         mixdepth=mixdepth,
@@ -358,6 +366,12 @@ def tumble(
             help="Directory servers (comma-separated). Defaults to mainnet directory nodes.",
         ),
     ] = None,
+    tor_socks_host: Annotated[
+        str, typer.Option(envvar="TOR_SOCKS_HOST", help="Tor SOCKS proxy host")
+    ] = "127.0.0.1",
+    tor_socks_port: Annotated[
+        int, typer.Option(envvar="TOR_SOCKS_PORT", help="Tor SOCKS proxy port")
+    ] = 9050,
     log_level: Annotated[str, typer.Option("--log-level", "-l", help="Log level")] = "INFO",
 ) -> None:
     """Run a tumbler schedule of CoinJoins."""
@@ -420,6 +434,8 @@ def tumble(
         backend_type=backend_type,
         backend_config=backend_config,
         directory_servers=dir_servers,
+        socks_host=tor_socks_host,
+        socks_port=tor_socks_port,
     )
 
     asyncio.run(_run_tumble(config, schedule))

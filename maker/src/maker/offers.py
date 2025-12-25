@@ -62,9 +62,16 @@ class OfferManager:
             if self.config.offer_type in (OfferType.SW0_RELATIVE, OfferType.SWA_RELATIVE):
                 cjfee = self.config.cj_fee_relative
 
-                min_size_for_profit = int(
-                    1.5 * self.config.tx_fee_contribution / float(self.config.cj_fee_relative)
-                )
+                # Validate cj_fee_relative to prevent division by zero
+                cj_fee_float = float(self.config.cj_fee_relative)
+                if cj_fee_float <= 0:
+                    logger.error(
+                        f"Invalid cj_fee_relative: {self.config.cj_fee_relative}. "
+                        "Must be > 0 for relative offer types."
+                    )
+                    return []
+
+                min_size_for_profit = int(1.5 * self.config.tx_fee_contribution / cj_fee_float)
                 min_size = max(min_size_for_profit, self.config.min_size)
             else:
                 cjfee = str(self.config.cj_fee_absolute)

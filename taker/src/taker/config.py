@@ -51,6 +51,10 @@ class TakerConfig(BaseModel):
     # Directory server settings
     directory_servers: list[str] = Field(default_factory=list)
 
+    # Tor/SOCKS configuration for outgoing connections
+    socks_host: str = "127.0.0.1"
+    socks_port: int = 9050
+
     # CoinJoin settings
     destination_address: str = ""  # Target address for CJ output, empty = INTERNAL
     amount: int = 0  # Amount in sats (0 = sweep)

@@ -99,47 +99,47 @@ The bot will:
 
 The defaults are sensible for most users:
 
-- **Offer type**: Relative fee (`sw0reloffer`)
-- **Relative fee**: 0.1% (0.001)
-- **Absolute fee**: 500 sats (only used if offer type is `sw0absoffer`)
+- **Fee model**: Relative fees (0.1%)
 - **Minimum size**: 100,000 sats
 
 ### Offer Types and Fees
 
-JoinMarket supports two fee models:
+JoinMarket supports two fee models. The maker bot **automatically detects** which model to use based on which fee parameter you provide:
 
-#### Relative Fees (Recommended)
+#### Relative Fees (Default)
 Charge a percentage of the CoinJoin amount:
-- **Offer type**: `sw0reloffer` (default)
-- **Fee**: Set via `--cj-fee-relative` (e.g., `0.001` = 0.1%)
+- **Auto-selected when**: You provide `--cj-fee-relative` (or neither fee parameter)
+- **Offer type**: `sw0reloffer`
+- **Default**: 0.1% (0.001)
+- **Example**: 0.2% of 1 BTC = 200,000 sats
 - **Pros**: Scales with transaction size, competitive for large amounts
 - **Cons**: May earn less on small transactions
 
 #### Absolute Fees
 Charge a fixed satoshi amount regardless of CoinJoin size:
+- **Auto-selected when**: You provide `--cj-fee-absolute`
 - **Offer type**: `sw0absoffer`
-- **Fee**: Set via `--cj-fee-absolute` (e.g., `500` sats)
+- **Default**: Not used (relative is default)
+- **Example**: Fixed 1000 sats per CoinJoin
 - **Pros**: Predictable earnings, better for small transactions
 - **Cons**: May be uncompetitive for large amounts
 
-**Note**: Only one fee type is active based on `--offer-type`. Both values are stored in config but only the relevant one is used.
+**Important**: Only provide ONE fee parameter. If you provide both, the maker will exit with an error.
 
 ### Custom Fee Settings
 
 ```bash
-# Relative fee (0.2%)
+# Relative fee (0.2%) - auto-selects sw0reloffer
 jm-maker start \
   --mnemonic-file ~/.jm/wallets/maker.mnemonic \
   --backend-type neutrino \
-  --offer-type sw0reloffer \
   --cj-fee-relative 0.002 \
   --min-size 200000
 
-# Absolute fee (1000 sats)
+# Absolute fee (1000 sats) - auto-selects sw0absoffer
 jm-maker start \
   --mnemonic-file ~/.jm/wallets/maker.mnemonic \
   --backend-type neutrino \
-  --offer-type sw0absoffer \
   --cj-fee-absolute 1000 \
   --min-size 200000
 ```
@@ -253,9 +253,8 @@ docker-compose up -d
 | `NEUTRINO_URL` | `http://localhost:8334` | Neutrino REST API URL |
 | `DIRECTORY_SERVERS` | (mainnet defaults) | Comma-separated list of directory servers |
 | `MIN_SIZE` | `100000` | Minimum CoinJoin size in sats |
-| `OFFER_TYPE` | `sw0reloffer` | Offer type: `sw0reloffer` (relative) or `sw0absoffer` (absolute) |
-| `CJ_FEE_RELATIVE` | `0.0002` | Relative fee (0.0002 = 0.02%) - used when OFFER_TYPE is relative |
-| `CJ_FEE_ABSOLUTE` | `500` | Absolute fee in sats - used when OFFER_TYPE is absolute |
+| `CJ_FEE_RELATIVE` | `0.001` | Relative fee (0.001 = 0.1%) - auto-selects relative offer type |
+| `CJ_FEE_ABSOLUTE` | - | Absolute fee in sats - auto-selects absolute offer type if set |
 | `TX_FEE_CONTRIBUTION` | `1000` | Transaction fee contribution in sats |
 | `TOR_SOCKS_HOST` | `127.0.0.1` | Tor SOCKS proxy host |
 | `TOR_SOCKS_PORT` | `9050` | Tor SOCKS proxy port |
@@ -281,9 +280,8 @@ jm-maker start --help
 |--------|---------|-------------|
 | `--mnemonic-file` | - | Path to encrypted wallet file |
 | `--backend-type` | full_node | Backend: full_node or neutrino |
-| `--offer-type` | sw0reloffer | Offer type: sw0reloffer (relative) or sw0absoffer (absolute) |
-| `--cj-fee-relative` | 0.001 | Relative fee (0.001 = 0.1%) |
-| `--cj-fee-absolute` | 500 | Absolute fee in sats |
+| `--cj-fee-relative` | 0.001 | Relative fee (0.001 = 0.1%) - auto-selects relative offers |
+| `--cj-fee-absolute` | - | Absolute fee in sats - auto-selects absolute offers |
 | `--min-size` | 100000 | Minimum CoinJoin size in sats |
 
 Use env vars for RPC credentials (see jmwallet README).

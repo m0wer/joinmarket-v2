@@ -63,9 +63,26 @@ class MakerConfig(BaseModel):
     model_config = {"frozen": False}
 
     @model_validator(mode="after")
-    def set_bitcoin_network_default(self) -> MakerConfig:
-        """If bitcoin_network is not set, default to the protocol network."""
+    def validate_config(self) -> MakerConfig:
+        """Validate configuration after initialization."""
+        # Set bitcoin_network default
         if self.bitcoin_network is None:
-            # Use object.__setattr__ since model might be frozen
             object.__setattr__(self, "bitcoin_network", self.network)
+
+        # Validate cj_fee_relative for relative offer types
+        if self.offer_type in (OfferType.SW0_RELATIVE, OfferType.SWA_RELATIVE):
+            try:
+                cj_fee_float = float(self.cj_fee_relative)
+                if cj_fee_float <= 0:
+                    raise ValueError(
+                        f"cj_fee_relative must be > 0 for relative offer types, "
+                        f"got {self.cj_fee_relative}"
+                    )
+            except ValueError as e:
+                if "could not convert" in str(e):
+                    raise ValueError(
+                        f"cj_fee_relative must be a valid number, got {self.cj_fee_relative}"
+                    ) from e
+                raise
+
         return self

@@ -56,12 +56,16 @@ class MultiDirectoryClient:
         directory_servers: list[str],
         network: str,
         nick_identity: NickIdentity,
+        socks_host: str = "127.0.0.1",
+        socks_port: int = 9050,
         neutrino_compat: bool = False,
     ):
         self.directory_servers = directory_servers
         self.network = network
         self.nick_identity = nick_identity
         self.nick = nick_identity.nick
+        self.socks_host = socks_host
+        self.socks_port = socks_port
         self.neutrino_compat = neutrino_compat
         self.clients: dict[str, DirectoryClient] = {}
         self._response_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
@@ -80,6 +84,8 @@ class MultiDirectoryClient:
                     port=port,
                     network=self.network,
                     nick_identity=self.nick_identity,
+                    socks_host=self.socks_host,
+                    socks_port=self.socks_port,
                     neutrino_compat=self.neutrino_compat,
                 )
                 await client.connect()
@@ -282,6 +288,8 @@ class Taker:
             directory_servers=config.directory_servers,
             network=config.network.value,
             nick_identity=self.nick_identity,
+            socks_host=config.socks_host,
+            socks_port=config.socks_port,
             neutrino_compat=neutrino_compat,
         )
 
