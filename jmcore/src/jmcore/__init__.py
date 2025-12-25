@@ -6,6 +6,12 @@ Provides shared functionality for protocol, crypto, and networking.
 
 __version__ = "2.2.0"
 
+from jmcore.constants import (
+    BITCOIN_DUST_THRESHOLD,
+    DEFAULT_DUST_THRESHOLD,
+    DUST_THRESHOLD,
+    STANDARD_DUST_LIMIT,
+)
 from jmcore.directory_client import DirectoryClient, DirectoryClientError
 from jmcore.encryption import CryptoSession, NaclError
 from jmcore.models import (
@@ -49,12 +55,15 @@ from jmcore.tor_control import (
 )
 
 __all__ = [
+    "BITCOIN_DUST_THRESHOLD",
     "CryptoSession",
+    "DEFAULT_DUST_THRESHOLD",
     "DIRECTORY_NODES_MAINNET",
     "DIRECTORY_NODES_SIGNET",
     "DIRECTORY_NODES_TESTNET",
     "DirectoryClient",
     "DirectoryClientError",
+    "DUST_THRESHOLD",
     "EphemeralHiddenService",
     "FEATURE_NEUTRINO_COMPAT",
     "FEATURE_PUSH_ENCRYPTED",
@@ -69,6 +78,7 @@ __all__ = [
     "PoDLEError",
     "ProtocolMessage",
     "RequiredFeatures",
+    "STANDARD_DUST_LIMIT",
     "TorAuthenticationError",
     "TorControlClient",
     "TorControlError",

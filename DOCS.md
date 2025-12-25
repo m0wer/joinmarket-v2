@@ -872,6 +872,112 @@ The protocol flow is implemented in:
 
 ---
 
+## Transaction Policies
+
+### Dust Threshold
+
+JoinMarket enforces a configurable dust threshold to ensure transaction outputs remain economically spendable and to account for fee estimation uncertainties in collaborative CoinJoin transactions.
+
+#### Threshold Values
+
+Following the reference implementation's approach, we define three threshold levels:
+
+1. **Standard Bitcoin Dust Limit**: 546 satoshis
+   - Minimum output value enforced by Bitcoin Core's `IsDust()` function for P2PKH outputs
+   - Calculated as: `3 * minRelayTxFee * outputSize`
+
+2. **Bitcoin Dust Threshold**: 2,730 satoshis (5x standard limit)
+   - Defined in `jmcore.constants.BITCOIN_DUST_THRESHOLD`
+   - Conservative buffer for direct Bitcoin payments
+
+3. **JoinMarket Dust Threshold**: 27,300 satoshis (10x Bitcoin threshold)
+   - Defined in `jmcore.constants.DUST_THRESHOLD`
+   - **Default for CoinJoin operations**
+   - Provides safety margin for:
+     - Fee estimation uncertainties in multi-party transactions
+     - Ensuring outputs remain economically spendable under varying fee conditions
+     - Preventing rejection by peers due to changing network conditions
+
+#### Why 27,300 Satoshis?
+
+The higher threshold for CoinJoin operations is a **JoinMarket policy**, not a Bitcoin protocol rule. It exists because:
+
+1. **Fee Estimation Safety**: CoinJoin transactions involve multiple participants. If an output is too close to the dust limit, slight variations in fee rates during the negotiation process could make the output uneconomical to spend later.
+
+2. **Economic Spendability**: An output must be worth more than the transaction fee needed to spend it. With rising fee rates, a 546-sat output might cost more to spend than it's worth.
+
+3. **Network Reliability**: Nodes may reject or deprioritize transactions with outputs close to the dust limit, especially during high-fee periods.
+
+#### Configuration
+
+Both Maker and Taker can configure their dust threshold:
+
+```python
+# Taker configuration (taker/src/taker/config.py)
+class TakerConfig(BaseModel):
+    dust_threshold: int = Field(
+        default=DUST_THRESHOLD,  # 27300 sats
+        ge=0,
+        description="Dust threshold in satoshis for change outputs"
+    )
+
+# Maker configuration (maker/src/maker/config.py)
+class MakerConfig(BaseModel):
+    dust_threshold: int = Field(
+        default=DUST_THRESHOLD,  # 27300 sats
+        ge=0,
+        description="Dust threshold in satoshis for change outputs"
+    )
+```
+
+#### Enforcement
+
+The dust threshold is enforced during transaction building:
+
+1. **Change Output Creation** (`taker/src/taker/tx_builder.py`):
+   - Taker change is only created if `change_amount > dust_threshold`
+   - Maker change is only created if `change_amount > dust_threshold`
+   - Change below threshold is donated to miners as fee
+
+2. **Offer Calculation** (`maker/src/maker/offers.py`):
+   - Makers reserve `max(dust_threshold, tx_fee_contribution)` when calculating available liquidity
+   - Ensures sufficient balance for change output or threshold buffer
+
+#### Backward Compatibility
+
+The configurable dust threshold maintains backward compatibility with the reference implementation:
+
+- **Default behavior**: Uses 27,300 sats (matches reference implementation)
+- **Configurable**: Can be lowered to 2,730 or 546 sats for non-CoinJoin direct payments
+- **Enforced**: Always applied during transaction building to prevent accidental dust creation
+
+#### Implementation Reference
+
+```python
+# Constants defined in jmcore/src/jmcore/constants.py
+STANDARD_DUST_LIMIT = 546         # Bitcoin Core default
+BITCOIN_DUST_THRESHOLD = 2730     # 5x standard (direct payments)
+DUST_THRESHOLD = 27300            # 10x Bitcoin threshold (CoinJoin default)
+
+# Transaction building with dust threshold
+tx_bytes, metadata = build_coinjoin_tx(
+    taker_utxos=...,
+    maker_data=...,
+    cj_amount=...,
+    dust_threshold=config.dust_threshold,  # Configurable
+    ...
+)
+```
+
+#### Testing
+
+Comprehensive tests verify dust threshold enforcement:
+- `taker/tests/test_tx_builder.py::test_build_coinjoin_configurable_dust_threshold`
+- Tests with 546, 27300, and custom thresholds
+- Verifies change output inclusion/exclusion based on threshold
+
+---
+
 ## Encryption Protocol
 
 Private messages containing sensitive data are encrypted using NaCl (libsodium) authenticated encryption.

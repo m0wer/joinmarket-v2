@@ -530,6 +530,7 @@ def build_coinjoin_tx(
     cj_amount: int,
     tx_fee: int,
     network: str = "mainnet",
+    dust_threshold: int = 27300,  # Default to DUST_THRESHOLD from jmcore.constants
 ) -> tuple[bytes, dict[str, Any]]:
     """
     Build a complete CoinJoin transaction.
@@ -543,6 +544,7 @@ def build_coinjoin_tx(
         cj_amount: Equal CoinJoin output amount
         tx_fee: Total transaction fee
         network: Network name
+        dust_threshold: Minimum output value in satoshis (default: 27300)
 
     Returns:
         (tx_bytes, metadata)
@@ -571,8 +573,13 @@ def build_coinjoin_tx(
 
     # Taker change output (if any)
     taker_change_output = None
-    if taker_change > 546:  # Dust threshold
+    if taker_change > dust_threshold:
         taker_change_output = TxOutput(address=taker_change_address, value=taker_change)
+    elif taker_change > 0:
+        logger.warning(
+            f"Taker change {taker_change} sats is below dust threshold ({dust_threshold}), "
+            "no change output will be created"
+        )
 
     # Build maker data
     maker_inputs: dict[str, list[TxInput]] = {}
@@ -605,7 +612,7 @@ def build_coinjoin_tx(
             f"Maker {nick} change calculation: "
             f"inputs={maker_total_input}, cj_amount={cj_amount}, "
             f"cjfee={data['cjfee']}, txfee={maker_txfee}, change={maker_change}, "
-            f"dust_threshold=546"
+            f"dust_threshold={dust_threshold}"
         )
 
         if maker_change < 0:
@@ -616,11 +623,12 @@ def build_coinjoin_tx(
                 f"required={cj_amount + maker_txfee - data['cjfee']} sats, "
                 f"change={maker_change} sats. Maker's UTXOs may have been spent."
             )
-        elif maker_change > 546:
+        elif maker_change > dust_threshold:
             maker_change_outputs[nick] = TxOutput(address=data["change_addr"], value=maker_change)
         else:
             logger.warning(
-                f"Maker {nick} change {maker_change} sats is below dust threshold (546), "
+                f"Maker {nick} change {maker_change} sats is below dust threshold "
+                f"({dust_threshold}), "
                 "no change output will be created"
             )
 

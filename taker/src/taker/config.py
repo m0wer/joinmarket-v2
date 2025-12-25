@@ -7,6 +7,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
+from jmcore.constants import DUST_THRESHOLD
 from jmcore.models import NetworkType, OfferType
 from pydantic import BaseModel, Field, model_validator
 
@@ -104,7 +105,11 @@ class TakerConfig(BaseModel):
     # Advanced options
     preferred_offer_type: OfferType = OfferType.SW0_RELATIVE
     minimum_makers: int = Field(default=2, ge=1)
-    dust_threshold: int = Field(default=546, ge=0)
+    dust_threshold: int = Field(
+        default=DUST_THRESHOLD,
+        ge=0,
+        description="Dust threshold in satoshis for change outputs (default: 27300)",
+    )
 
     @model_validator(mode="after")
     def set_bitcoin_network_default(self) -> TakerConfig:

@@ -52,8 +52,10 @@ class OfferManager:
             max_mixdepth = max(available_mixdepths, key=lambda md: available_mixdepths[md])
             max_balance = available_mixdepths[max_mixdepth]
 
-            dust_threshold = 5000
-            max_available = max_balance - max(dust_threshold, self.config.tx_fee_contribution)
+            # Reserve dust threshold + tx fee contribution
+            max_available = max_balance - max(
+                self.config.dust_threshold, self.config.tx_fee_contribution
+            )
 
             if max_available <= self.config.min_size:
                 logger.warning(f"Insufficient balance: {max_available} <= {self.config.min_size}")

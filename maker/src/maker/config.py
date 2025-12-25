@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from jmcore.constants import DUST_THRESHOLD
 from jmcore.models import NetworkType, OfferType
 from pydantic import BaseModel, Field, model_validator
 
@@ -93,6 +94,13 @@ class MakerConfig(BaseModel):
         default=300,
         ge=60,
         description="Maximum time for a CoinJoin session to complete (all states)",
+    )
+
+    # Dust threshold for change outputs
+    dust_threshold: int = Field(
+        default=DUST_THRESHOLD,
+        ge=0,
+        description="Dust threshold in satoshis for change outputs (default: 27300)",
     )
 
     model_config = {"frozen": False}

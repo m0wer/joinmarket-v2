@@ -953,6 +953,7 @@ class Taker:
                 cj_amount=self.cj_amount,
                 tx_fee=tx_fee,
                 network=network,
+                dust_threshold=self.config.dust_threshold,
             )
 
             logger.info(f"Built unsigned tx: {len(self.unsigned_tx)} bytes")
