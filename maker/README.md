@@ -99,17 +99,47 @@ The bot will:
 
 The defaults are sensible for most users:
 
+- **Offer type**: Relative fee (`sw0reloffer`)
 - **Relative fee**: 0.1% (0.001)
-- **Absolute fee**: 500 sats
+- **Absolute fee**: 500 sats (only used if offer type is `sw0absoffer`)
 - **Minimum size**: 100,000 sats
+
+### Offer Types and Fees
+
+JoinMarket supports two fee models:
+
+#### Relative Fees (Recommended)
+Charge a percentage of the CoinJoin amount:
+- **Offer type**: `sw0reloffer` (default)
+- **Fee**: Set via `--cj-fee-relative` (e.g., `0.001` = 0.1%)
+- **Pros**: Scales with transaction size, competitive for large amounts
+- **Cons**: May earn less on small transactions
+
+#### Absolute Fees
+Charge a fixed satoshi amount regardless of CoinJoin size:
+- **Offer type**: `sw0absoffer`
+- **Fee**: Set via `--cj-fee-absolute` (e.g., `500` sats)
+- **Pros**: Predictable earnings, better for small transactions
+- **Cons**: May be uncompetitive for large amounts
+
+**Note**: Only one fee type is active based on `--offer-type`. Both values are stored in config but only the relevant one is used.
 
 ### Custom Fee Settings
 
 ```bash
+# Relative fee (0.2%)
 jm-maker start \
   --mnemonic-file ~/.jm/wallets/maker.mnemonic \
   --backend-type neutrino \
+  --offer-type sw0reloffer \
   --cj-fee-relative 0.002 \
+  --min-size 200000
+
+# Absolute fee (1000 sats)
+jm-maker start \
+  --mnemonic-file ~/.jm/wallets/maker.mnemonic \
+  --backend-type neutrino \
+  --offer-type sw0absoffer \
   --cj-fee-absolute 1000 \
   --min-size 200000
 ```
@@ -208,6 +238,30 @@ Run with:
 docker-compose up -d
 ```
 
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MNEMONIC_FILE` | - | Path to mnemonic file (recommended) |
+| `MNEMONIC` | - | Direct mnemonic phrase (not recommended for production) |
+| `BACKEND_TYPE` | `full_node` | Backend: `full_node` or `neutrino` |
+| `NETWORK` | `mainnet` | Protocol network for handshakes |
+| `BITCOIN_NETWORK` | `$NETWORK` | Bitcoin network for address generation |
+| `BITCOIN_RPC_URL` | `http://localhost:8332` | Bitcoin Core RPC URL |
+| `BITCOIN_RPC_USER` | - | Bitcoin Core RPC username |
+| `BITCOIN_RPC_PASSWORD` | - | Bitcoin Core RPC password |
+| `NEUTRINO_URL` | `http://localhost:8334` | Neutrino REST API URL |
+| `DIRECTORY_SERVERS` | (mainnet defaults) | Comma-separated list of directory servers |
+| `MIN_SIZE` | `100000` | Minimum CoinJoin size in sats |
+| `OFFER_TYPE` | `sw0reloffer` | Offer type: `sw0reloffer` (relative) or `sw0absoffer` (absolute) |
+| `CJ_FEE_RELATIVE` | `0.0002` | Relative fee (0.0002 = 0.02%) - used when OFFER_TYPE is relative |
+| `CJ_FEE_ABSOLUTE` | `500` | Absolute fee in sats - used when OFFER_TYPE is absolute |
+| `TX_FEE_CONTRIBUTION` | `1000` | Transaction fee contribution in sats |
+| `TOR_SOCKS_HOST` | `127.0.0.1` | Tor SOCKS proxy host |
+| `TOR_SOCKS_PORT` | `9050` | Tor SOCKS proxy port |
+| `FIDELITY_BOND_LOCKTIMES` | - | Comma-separated Unix timestamps for bond locktimes |
+| `SENSITIVE_LOGGING` | - | Enable sensitive logging (set to `1` or `true`) |
+
 ## CLI Reference
 
 ```bash
@@ -227,6 +281,7 @@ jm-maker start --help
 |--------|---------|-------------|
 | `--mnemonic-file` | - | Path to encrypted wallet file |
 | `--backend-type` | full_node | Backend: full_node or neutrino |
+| `--offer-type` | sw0reloffer | Offer type: sw0reloffer (relative) or sw0absoffer (absolute) |
 | `--cj-fee-relative` | 0.001 | Relative fee (0.001 = 0.1%) |
 | `--cj-fee-absolute` | 500 | Absolute fee in sats |
 | `--min-size` | 100000 | Minimum CoinJoin size in sats |

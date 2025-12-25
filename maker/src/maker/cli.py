@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from jmcore.models import NetworkType, get_default_directory_nodes
+from jmcore.models import NetworkType, OfferType, get_default_directory_nodes
 from jmwallet.backends.bitcoin_core import BitcoinCoreBackend
 from jmwallet.backends.neutrino import NeutrinoBackend
 from jmwallet.wallet.service import WalletService
@@ -37,7 +37,8 @@ def load_mnemonic(
     Priority:
     1. --mnemonic argument
     2. --mnemonic-file argument
-    3. MNEMONIC environment variable
+    3. MNEMONIC_FILE environment variable (path to mnemonic file)
+    4. MNEMONIC environment variable
 
     Args:
         mnemonic: Direct mnemonic string
@@ -53,26 +54,35 @@ def load_mnemonic(
     if mnemonic:
         return mnemonic
 
-    if mnemonic_file:
-        if not mnemonic_file.exists():
-            raise ValueError(f"Mnemonic file not found: {mnemonic_file}")
+    # Check for mnemonic file (from argument or environment)
+    actual_mnemonic_file = mnemonic_file
+    if not actual_mnemonic_file:
+        env_mnemonic_file = os.environ.get("MNEMONIC_FILE")
+        if env_mnemonic_file:
+            actual_mnemonic_file = Path(env_mnemonic_file)
+
+    if actual_mnemonic_file:
+        if not actual_mnemonic_file.exists():
+            raise ValueError(f"Mnemonic file not found: {actual_mnemonic_file}")
 
         # Import the mnemonic loading utilities from jmwallet
         from jmwallet.cli import load_mnemonic_file
 
         try:
-            return load_mnemonic_file(mnemonic_file, password)
+            return load_mnemonic_file(actual_mnemonic_file, password)
         except ValueError:
             # File is encrypted, need password
             if password is None:
                 password = typer.prompt("Enter mnemonic file password", hide_input=True)
-            return load_mnemonic_file(mnemonic_file, password)
+            return load_mnemonic_file(actual_mnemonic_file, password)
 
     env_mnemonic = os.environ.get("MNEMONIC")
     if env_mnemonic:
         return env_mnemonic
 
-    raise ValueError("Mnemonic required. Use --mnemonic, --mnemonic-file, or MNEMONIC env var")
+    raise ValueError(
+        "Mnemonic required. Use --mnemonic, --mnemonic-file, MNEMONIC_FILE, or MNEMONIC env var"
+    )
 
 
 def create_wallet_service(config: MakerConfig) -> WalletService:
@@ -145,6 +155,13 @@ def start(
         str | None, typer.Option(envvar="NEUTRINO_URL", help="Neutrino REST API URL")
     ] = None,
     min_size: Annotated[int, typer.Option(help="Minimum CoinJoin size in sats")] = 100_000,
+    offer_type: Annotated[
+        str,
+        typer.Option(
+            help="Offer type: sw0absoffer (absolute) or sw0reloffer (relative)",
+            envvar="OFFER_TYPE",
+        ),
+    ] = "sw0reloffer",
     cj_fee_relative: Annotated[
         str, typer.Option(help="Relative coinjoin fee (e.g., 0.001 = 0.1%)")
     ] = "0.001",
@@ -184,6 +201,16 @@ def start(
     # Use bitcoin_network for address generation, default to network if not specified
     actual_bitcoin_network = bitcoin_network or network
 
+    # Parse and validate offer type
+    try:
+        parsed_offer_type = OfferType(offer_type)
+    except ValueError:
+        logger.error(
+            f"Invalid offer type: {offer_type}. "
+            "Valid options: sw0absoffer, sw0reloffer, swabsoffer, swreloffer"
+        )
+        raise typer.Exit(1)
+
     # Resolve directory servers: use provided list or default for network
     resolved_directory_servers = (
         directory_servers if directory_servers else get_default_directory_nodes(network)
@@ -210,6 +237,7 @@ def start(
         backend_config=backend_config,
         directory_servers=resolved_directory_servers,
         min_size=min_size,
+        offer_type=parsed_offer_type,
         cj_fee_relative=cj_fee_relative,
         cj_fee_absolute=cj_fee_absolute,
         tx_fee_contribution=tx_fee_contribution,

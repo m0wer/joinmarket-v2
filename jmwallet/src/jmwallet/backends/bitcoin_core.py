@@ -6,6 +6,7 @@ Uses RPC calls but NOT wallet functionality (no BDB dependency).
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 from collections.abc import Sequence
 from typing import Any
@@ -22,11 +23,16 @@ DEFAULT_RPC_TIMEOUT = 30.0
 SCAN_RPC_TIMEOUT = 300.0  # 5 minutes
 
 # Maximum retries for scantxoutset when another scan is in progress
-SCAN_MAX_RETRIES = 10
+# Mainnet UTXO scans can take 90+ seconds, so we need many retries
+SCAN_MAX_RETRIES = 30
 SCAN_BASE_DELAY = 0.5  # Base delay in seconds for exponential backoff
 
-# Polling interval for scan status checks
-SCAN_STATUS_POLL_INTERVAL = 5.0  # seconds
+# Polling interval for scan status checks (mainnet scans take ~90 seconds)
+SCAN_STATUS_POLL_INTERVAL = 10.0  # seconds
+
+# Environment variable to enable sensitive logging (descriptors, addresses, etc.)
+# WARNING: Enabling this will log wallet descriptors and addresses to the log
+SENSITIVE_LOGGING = os.environ.get("SENSITIVE_LOGGING", "").lower() in ("1", "true", "yes")
 
 
 class BitcoinCoreBackend(BlockchainBackend):
@@ -129,7 +135,8 @@ class BitcoinCoreBackend(BlockchainBackend):
                 status = await self._rpc_call("scantxoutset", ["status"])
                 if status is not None:
                     # A scan is in progress - wait for it
-                    progress = status.get("progress", 0)
+                    # Bitcoin Core returns progress as 0-100, not 0-1
+                    progress = status.get("progress", 0) / 100.0
                     logger.debug(
                         f"Another scan in progress ({progress:.1%}), waiting... "
                         f"(attempt {attempt + 1}/{SCAN_MAX_RETRIES})"
@@ -140,9 +147,19 @@ class BitcoinCoreBackend(BlockchainBackend):
 
                 # Start our scan with extended timeout
                 logger.debug(f"Starting UTXO scan for {len(descriptors)} descriptor(s)...")
+                if SENSITIVE_LOGGING:
+                    logger.debug(f"Descriptors for scan: {descriptors}")
                 result = await self._rpc_call(
                     "scantxoutset", ["start", descriptors], client=self._scan_client
                 )
+                if result:
+                    unspent_count = len(result.get("unspents", []))
+                    total_amount = result.get("total_amount", 0)
+                    logger.debug(
+                        f"Scan completed: found {unspent_count} UTXOs, total {total_amount:.8f} BTC"
+                    )
+                    if SENSITIVE_LOGGING and unspent_count > 0:
+                        logger.debug(f"Scan result: {result}")
                 return result
 
             except ValueError as e:
@@ -199,6 +216,8 @@ class BitcoinCoreBackend(BlockchainBackend):
         for i in range(0, len(addresses), batch_size):
             chunk = addresses[i : i + batch_size]
             descriptors = [f"addr({addr})" for addr in chunk]
+            if SENSITIVE_LOGGING:
+                logger.debug(f"Scanning addresses batch {i // batch_size + 1}: {chunk}")
 
             try:
                 # Scan for all addresses in this chunk at once (with retry for conflicts)

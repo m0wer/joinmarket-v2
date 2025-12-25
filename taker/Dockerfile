@@ -45,6 +45,7 @@ ENV NETWORK=mainnet
 # Defaults to NETWORK if not set
 ENV BITCOIN_NETWORK=
 ENV LOG_LEVEL=INFO
+ENV BACKEND_TYPE=full_node
 
 # CoinJoin settings
 ENV COINJOIN_AMOUNT=1000000
@@ -65,9 +66,17 @@ ENV BITCOIN_RPC_PASSWORD=
 ENV NEUTRINO_URL=http://localhost:8334
 
 # Directory servers (comma-separated list of host:port)
+# Leave empty to use default mainnet directory nodes
 ENV DIRECTORY_SERVERS=
 
-# Wallet mnemonic (REQUIRED - set at runtime!)
+# Wallet mnemonic - one of MNEMONIC or MNEMONIC_FILE is required
+# MNEMONIC: Direct mnemonic phrase (not recommended for production)
+# MNEMONIC_FILE: Path to mnemonic file (recommended - mount as volume)
 # ENV MNEMONIC=
+# ENV MNEMONIC_FILE=/wallets/taker.mnemonic
+
+# Enable sensitive logging (descriptors, addresses) for debugging
+# WARNING: Do not enable in production - exposes wallet information
+ENV SENSITIVE_LOGGING=
 
 CMD ["jm-taker", "--help"]

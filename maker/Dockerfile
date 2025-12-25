@@ -65,14 +65,22 @@ ENV BITCOIN_RPC_PASSWORD=
 ENV NEUTRINO_URL=http://localhost:8334
 
 # Directory servers (comma-separated list of host:port)
+# Leave empty to use default mainnet directory nodes
 ENV DIRECTORY_SERVERS=
 
 # Fidelity bond locktimes (comma-separated list of Unix timestamps)
 # These are used to scan for timelocked fidelity bond UTXOs
 ENV FIDELITY_BOND_LOCKTIMES=
 
-# Wallet mnemonic (REQUIRED - set at runtime!)
+# Wallet mnemonic - one of MNEMONIC or MNEMONIC_FILE is required
+# MNEMONIC: Direct mnemonic phrase (not recommended for production)
+# MNEMONIC_FILE: Path to mnemonic file (recommended - mount as volume)
 # ENV MNEMONIC=
+# ENV MNEMONIC_FILE=/wallets/maker.mnemonic
+
+# Enable sensitive logging (descriptors, addresses) for debugging
+# WARNING: Do not enable in production - exposes wallet information
+ENV SENSITIVE_LOGGING=
 
 # Use shell to conditionally add optional arguments
 CMD ["sh", "-c", "\
@@ -86,8 +94,18 @@ CMD ["sh", "-c", "\
             FIDELITY_BOND_ARGS=\"${FIDELITY_BOND_ARGS} --fidelity-bond-locktime ${lt}\"; \
         done; \
     fi; \
+    MNEMONIC_ARG=\"\"; \
+    if [ -n \"${MNEMONIC_FILE}\" ]; then \
+        MNEMONIC_ARG=\"--mnemonic-file ${MNEMONIC_FILE}\"; \
+    elif [ -n \"${MNEMONIC}\" ]; then \
+        MNEMONIC_ARG=\"--mnemonic ${MNEMONIC}\"; \
+    fi; \
+    DIRECTORY_ARG=\"\"; \
+    if [ -n \"${DIRECTORY_SERVERS}\" ]; then \
+        DIRECTORY_ARG=\"--directory-servers ${DIRECTORY_SERVERS}\"; \
+    fi; \
     jm-maker start \
-    --mnemonic \"${MNEMONIC}\" \
+    ${MNEMONIC_ARG} \
     --network \"${NETWORK}\" \
     ${BITCOIN_NETWORK_ARG} \
     --backend-type \"${BACKEND_TYPE}\" \
@@ -96,7 +114,9 @@ CMD ["sh", "-c", "\
     --rpc-password \"${BITCOIN_RPC_PASSWORD}\" \
     --neutrino-url \"${NEUTRINO_URL}\" \
     --min-size \"${MIN_SIZE}\" \
+    --offer-type \"${OFFER_TYPE}\" \
     --cj-fee-relative \"${CJ_FEE_RELATIVE}\" \
+    --cj-fee-absolute \"${CJ_FEE_ABSOLUTE}\" \
     --tx-fee-contribution \"${TX_FEE_CONTRIBUTION}\" \
-    --directory-servers \"${DIRECTORY_SERVERS}\" \
+    ${DIRECTORY_ARG} \
     ${FIDELITY_BOND_ARGS}"]

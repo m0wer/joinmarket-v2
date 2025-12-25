@@ -203,6 +203,7 @@ services:
       dockerfile: taker/Dockerfile
     environment:
       MNEMONIC_FILE: /wallets/taker.mnemonic
+      BACKEND_TYPE: neutrino
       NEUTRINO_URL: http://neutrino:8334
     volumes:
       - ~/.jm/wallets:/wallets:ro
@@ -238,6 +239,7 @@ services:
       dockerfile: taker/Dockerfile
     environment:
       MNEMONIC_FILE: /wallets/taker.mnemonic
+      BACKEND_TYPE: full_node
       BITCOIN_RPC_URL: http://bitcoind:8332
       BITCOIN_RPC_USER: rpcuser
       BITCOIN_RPC_PASSWORD: rpcpassword
@@ -268,6 +270,28 @@ Run with:
 ```bash
 docker-compose up
 ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MNEMONIC_FILE` | - | Path to mnemonic file (recommended) |
+| `MNEMONIC` | - | Direct mnemonic phrase (not recommended for production) |
+| `BACKEND_TYPE` | `full_node` | Backend: `full_node` or `neutrino` |
+| `NETWORK` | `mainnet` | Protocol network for handshakes |
+| `BITCOIN_NETWORK` | `$NETWORK` | Bitcoin network for address generation |
+| `BITCOIN_RPC_URL` | `http://localhost:8332` | Bitcoin Core RPC URL |
+| `BITCOIN_RPC_USER` | - | Bitcoin Core RPC username |
+| `BITCOIN_RPC_PASSWORD` | - | Bitcoin Core RPC password |
+| `NEUTRINO_URL` | `http://localhost:8334` | Neutrino REST API URL |
+| `DIRECTORY_SERVERS` | (mainnet defaults) | Comma-separated list of directory servers |
+| `COINJOIN_AMOUNT` | `1000000` | Default CoinJoin amount in sats |
+| `MIN_MAKERS` | `4` | Minimum number of makers |
+| `MAX_CJ_FEE_REL` | `0.001` | Maximum relative fee (0.1%) |
+| `MAX_CJ_FEE_ABS` | `5000` | Maximum absolute fee in sats |
+| `TOR_SOCKS_HOST` | `127.0.0.1` | Tor SOCKS proxy host |
+| `TOR_SOCKS_PORT` | `9050` | Tor SOCKS proxy port |
+| `SENSITIVE_LOGGING` | - | Enable sensitive logging (set to `1` or `true`) |
 
 ## CLI Reference
 

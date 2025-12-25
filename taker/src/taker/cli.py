@@ -48,7 +48,8 @@ def load_mnemonic(
     Priority:
     1. --mnemonic argument
     2. --mnemonic-file argument
-    3. MNEMONIC environment variable
+    3. MNEMONIC_FILE environment variable (path to mnemonic file)
+    4. MNEMONIC environment variable
 
     Args:
         mnemonic: Direct mnemonic string
@@ -64,26 +65,35 @@ def load_mnemonic(
     if mnemonic:
         return mnemonic
 
-    if mnemonic_file:
-        if not mnemonic_file.exists():
-            raise ValueError(f"Mnemonic file not found: {mnemonic_file}")
+    # Check for mnemonic file (from argument or environment)
+    actual_mnemonic_file = mnemonic_file
+    if not actual_mnemonic_file:
+        env_mnemonic_file = os.environ.get("MNEMONIC_FILE")
+        if env_mnemonic_file:
+            actual_mnemonic_file = Path(env_mnemonic_file)
+
+    if actual_mnemonic_file:
+        if not actual_mnemonic_file.exists():
+            raise ValueError(f"Mnemonic file not found: {actual_mnemonic_file}")
 
         # Import the mnemonic loading utilities from jmwallet
         from jmwallet.cli import load_mnemonic_file
 
         try:
-            return load_mnemonic_file(mnemonic_file, password)
+            return load_mnemonic_file(actual_mnemonic_file, password)
         except ValueError:
             # File is encrypted, need password
             if password is None:
                 password = typer.prompt("Enter mnemonic file password", hide_input=True)
-            return load_mnemonic_file(mnemonic_file, password)
+            return load_mnemonic_file(actual_mnemonic_file, password)
 
     env_mnemonic = os.environ.get("MNEMONIC")
     if env_mnemonic:
         return env_mnemonic
 
-    raise ValueError("Mnemonic required. Use --mnemonic, --mnemonic-file, or MNEMONIC env var")
+    raise ValueError(
+        "Mnemonic required. Use --mnemonic, --mnemonic-file, MNEMONIC_FILE, or MNEMONIC env var"
+    )
 
 
 @app.command()
