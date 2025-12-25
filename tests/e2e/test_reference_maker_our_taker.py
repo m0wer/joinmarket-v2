@@ -179,6 +179,51 @@ def get_jam_maker_address(maker_id: int, wallet_name: str, password: str) -> str
     return None
 
 
+def ensure_miner_wallet() -> bool:
+    """
+    Ensure the miner wallet exists and has funds.
+
+    Returns:
+        True if wallet is ready
+    """
+    # Check if miner wallet exists
+    result = run_bitcoin_cmd(["listwallets"])
+    if result.returncode == 0:
+        wallets = result.stdout.strip()
+        if "miner" not in wallets:
+            logger.info("Creating miner wallet...")
+            result = run_bitcoin_cmd(["createwallet", "miner"])
+            if result.returncode != 0:
+                logger.error(f"Failed to create miner wallet: {result.stderr}")
+                return False
+            logger.info("Miner wallet created")
+
+    # Check balance and mine if needed
+    result = run_bitcoin_cmd(["-rpcwallet=miner", "getbalance"])
+    if result.returncode == 0:
+        try:
+            balance = float(result.stdout.strip())
+            logger.info(f"Miner wallet balance: {balance} BTC")
+            if balance < 10.0:  # Need at least 10 BTC for testing
+                logger.info("Mining blocks to miner wallet for initial funds...")
+                result = run_bitcoin_cmd(["-rpcwallet=miner", "getnewaddress"])
+                if result.returncode == 0:
+                    miner_addr = result.stdout.strip()
+                    result = run_bitcoin_cmd(["generatetoaddress", "101", miner_addr])
+                    if result.returncode == 0:
+                        logger.info("Mined 101 blocks for coinbase maturity")
+                        return True
+                return False
+        except ValueError:
+            logger.error(f"Invalid balance: {result.stdout}")
+            return False
+    else:
+        logger.error(f"Failed to get miner balance: {result.stderr}")
+        return False
+
+    return True
+
+
 def fund_jam_maker_wallet(address: str, amount_btc: float = 2.0) -> bool:
     """
     Fund a JAM maker wallet using the miner wallet.
@@ -192,13 +237,54 @@ def fund_jam_maker_wallet(address: str, amount_btc: float = 2.0) -> bool:
     """
     logger.info(f"Funding {address} with {amount_btc} BTC...")
 
+    # First, check if miner wallet has enough funds
+    result = run_bitcoin_cmd(["-rpcwallet=miner", "getbalance"])
+    if result.returncode != 0:
+        logger.error(f"Failed to get miner balance: {result.stderr}")
+        # Try to mine some blocks to the miner wallet first
+        logger.info("Mining blocks to miner wallet...")
+        result = run_bitcoin_cmd(["-rpcwallet=miner", "getnewaddress"])
+        if result.returncode == 0:
+            miner_addr = result.stdout.strip()
+            result = run_bitcoin_cmd(["generatetoaddress", "101", miner_addr])
+            if result.returncode != 0:
+                logger.error(f"Failed to mine blocks: {result.stderr}")
+                return False
+            logger.info("Mined 101 blocks to miner wallet")
+        else:
+            logger.error(f"Failed to get miner address: {result.stderr}")
+            return False
+
     # Send from miner wallet
     result = run_bitcoin_cmd(
         ["-rpcwallet=miner", "sendtoaddress", address, str(amount_btc)]
     )
     if result.returncode != 0:
         logger.error(f"Failed to send: {result.stderr}")
-        return False
+        # Check if error is due to insufficient funds
+        if (
+            "insufficient" in result.stderr.lower()
+            or "balance" in result.stderr.lower()
+        ):
+            logger.info("Miner wallet has insufficient funds, mining more blocks...")
+            result = run_bitcoin_cmd(["-rpcwallet=miner", "getnewaddress"])
+            if result.returncode == 0:
+                miner_addr = result.stdout.strip()
+                result = run_bitcoin_cmd(["generatetoaddress", "50", miner_addr])
+                if result.returncode == 0:
+                    logger.info("Mined 50 additional blocks")
+                    # Retry sending
+                    result = run_bitcoin_cmd(
+                        ["-rpcwallet=miner", "sendtoaddress", address, str(amount_btc)]
+                    )
+                    if result.returncode != 0:
+                        logger.error(f"Failed to send after mining: {result.stderr}")
+                        return False
+                else:
+                    logger.error(f"Failed to mine additional blocks: {result.stderr}")
+                    return False
+        else:
+            return False
 
     txid = result.stdout.strip()
     logger.info(f"Sent {amount_btc} BTC, txid: {txid}")
@@ -456,6 +542,10 @@ def funded_jam_makers(reference_maker_services):
 
     Returns wallet info for both makers.
     """
+    # Ensure miner wallet exists and has funds
+    if not ensure_miner_wallet():
+        pytest.skip("Failed to setup miner wallet")
+
     makers = []
 
     for maker_id in [1, 2]:
@@ -552,6 +642,10 @@ async def test_our_taker_with_reference_makers(
     Tor connections are needed between taker and makers.
     """
     compose_file = reference_maker_services["compose_file"]
+
+    # Ensure miner wallet is ready
+    if not ensure_miner_wallet():
+        pytest.skip("Failed to setup miner wallet")
 
     # Ensure bitcoin nodes are synced
     logger.info("Checking bitcoin node sync...")

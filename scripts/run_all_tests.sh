@@ -27,7 +27,9 @@ log_info "Working directory: $PROJECT_ROOT"
 
 # Test results tracking
 FAILED_TESTS=()
+FAILED_TEST_DETAILS=()
 COVERAGE_FILES=()
+TEMP_TEST_OUTPUT="/tmp/jm_test_suite_$$.log"
 
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $*"
@@ -48,6 +50,9 @@ log_error() {
 # Complete cleanup function
 cleanup_all() {
     log_info "Performing complete cleanup..."
+
+    # Clean up temporary test output files
+    rm -f "${TEMP_TEST_OUTPUT}".* 2>/dev/null || true
 
     # Stop all profiles
     docker compose --profile e2e --profile reference --profile neutrino --profile reference-maker down -v 2>/dev/null || true
@@ -131,11 +136,19 @@ run_test_suite() {
     log_info "Running $test_name..."
     log_info "Command: pytest -c \"$PROJECT_ROOT/pytest.ini\" --fail-on-skip $*"
 
-    if pytest -c "$PROJECT_ROOT/pytest.ini" --fail-on-skip "$@"; then
+    # Run pytest and capture output
+    local test_output_file="${TEMP_TEST_OUTPUT}.${test_name// /_}"
+    if pytest -c "$PROJECT_ROOT/pytest.ini" --fail-on-skip "$@" 2>&1 | tee "$test_output_file"; then
         log_success "$test_name passed"
+        rm -f "$test_output_file"
     else
         log_error "$test_name failed"
         FAILED_TESTS+=("$test_name")
+
+        # Extract failed test names from output
+        local failed_details
+        failed_details=$(grep -E "^FAILED|^ERROR" "$test_output_file" | head -10 || echo "See full output for details")
+        FAILED_TEST_DETAILS+=("$test_name:|$failed_details")
     fi
 
     # Always return success to continue running other test suites
@@ -169,7 +182,7 @@ main() {
 
     # Note: pytest.ini already has '-m "not docker"' as default, so Docker tests
     # in maker/tests/integration/ are automatically excluded
-    run_test_suite "Unit Tests" \
+    COVERAGE_FILE=.coverage.unit run_test_suite "Unit Tests" \
         -lv \
         --cov=jmcore --cov=jmwallet --cov=directory_server \
         --cov=orderbook_watcher --cov=maker --cov=taker \
@@ -178,8 +191,7 @@ main() {
         jmcore/ jmwallet/ directory_server/ orderbook_watcher/ maker/ taker/
 
     # Save unit test coverage
-    if [ -f .coverage ]; then
-        cp .coverage .coverage.unit
+    if [ -f .coverage.unit ]; then
         COVERAGE_FILES+=(".coverage.unit")
         log_info "Saved unit test coverage"
     else
@@ -202,7 +214,7 @@ main() {
     restart_makers
 
     # Run e2e tests from tests/ directory
-    run_test_suite "E2E Tests" \
+    COVERAGE_FILE=.coverage.e2e run_test_suite "E2E Tests" \
         -lv -m e2e \
         --cov=jmcore --cov=jmwallet --cov=directory_server \
         --cov=orderbook_watcher --cov=maker --cov=taker \
@@ -213,22 +225,28 @@ main() {
     # Run Docker integration tests from component directories (e.g., maker/tests/integration/)
     # These are marked with @pytest.mark.docker but not with e2e/reference/neutrino
     # Run from project root to ensure conftest.py is loaded
-    run_test_suite "Docker Integration Tests" \
+    COVERAGE_FILE=.coverage.docker run_test_suite "Docker Integration Tests" \
         -lv -m "docker and not e2e and not reference and not neutrino and not reference_maker" \
         --cov=jmcore --cov=jmwallet --cov=directory_server \
         --cov=orderbook_watcher --cov=maker --cov=taker \
-        --cov-append \
         --cov-report=term-missing \
         "$PROJECT_ROOT/maker/tests/integration/" \
         "$PROJECT_ROOT/jmwallet/tests/"
 
     # Save e2e coverage
-    if [ -f .coverage ]; then
-        cp .coverage .coverage.e2e
+    if [ -f .coverage.e2e ]; then
         COVERAGE_FILES+=(".coverage.e2e")
         log_info "Saved e2e coverage"
     else
         log_warning "No .coverage file found for e2e tests"
+    fi
+
+    # Save docker integration coverage
+    if [ -f .coverage.docker ]; then
+        COVERAGE_FILES+=(".coverage.docker")
+        log_info "Saved docker integration coverage"
+    else
+        log_warning "No .coverage file found for docker integration tests"
     fi
 
     echo
@@ -255,7 +273,7 @@ main() {
     sleep 60
     restart_makers
 
-    run_test_suite "Reference Tests" \
+    COVERAGE_FILE=.coverage.reference run_test_suite "Reference Tests" \
         -lv -m reference \
         --cov=jmcore --cov=jmwallet --cov=directory_server \
         --cov=orderbook_watcher --cov=maker --cov=taker \
@@ -263,9 +281,8 @@ main() {
         --cov-report=html:htmlcov/reference \
         tests/
 
-    # Save reference coverage
-    if [ -f .coverage ]; then
-        cp .coverage .coverage.reference
+    # Coverage file already saved with correct name
+    if [ -f .coverage.reference ]; then
         COVERAGE_FILES+=(".coverage.reference")
         log_info "Saved reference test coverage"
     else
@@ -286,16 +303,15 @@ main() {
     log_info "Waiting for JAM makers to start (60s)..."
     sleep 60
 
-    run_test_suite "Reference Maker Tests" \
+    COVERAGE_FILE=.coverage.reference_maker run_test_suite "Reference Maker Tests" \
         -lv -m reference_maker \
         --cov=taker \
         --cov-report=term-missing \
         --cov-report=html:htmlcov/reference_maker \
         tests/
 
-    # Save reference maker coverage
-    if [ -f .coverage ]; then
-        cp .coverage .coverage.reference_maker
+    # Coverage file already saved with correct name
+    if [ -f .coverage.reference_maker ]; then
         COVERAGE_FILES+=(".coverage.reference_maker")
         log_info "Saved reference maker coverage"
     else
@@ -322,7 +338,7 @@ main() {
     sleep 30
 
     # Run basic neutrino tests
-    run_test_suite "Neutrino Basic Tests" \
+    COVERAGE_FILE=.coverage.neutrino run_test_suite "Neutrino Basic Tests" \
         -lv -m "neutrino and not slow" \
         --cov=jmcore --cov=jmwallet --cov=maker \
         --cov-report=term-missing \
@@ -330,8 +346,7 @@ main() {
         tests/
 
     # Save neutrino coverage
-    if [ -f .coverage ]; then
-        cp .coverage .coverage.neutrino
+    if [ -f .coverage.neutrino ]; then
         COVERAGE_FILES+=(".coverage.neutrino")
         log_info "Saved neutrino basic test coverage"
     else
@@ -344,16 +359,15 @@ main() {
     sleep 10
     restart_makers
 
-    run_test_suite "Neutrino CoinJoin Tests" \
+    COVERAGE_FILE=.coverage.neutrino_slow run_test_suite "Neutrino CoinJoin Tests" \
         -lv -m 'neutrino and slow' \
         --cov=jmcore --cov=jmwallet --cov=maker --cov=taker \
         --cov-report=term-missing \
         --cov-report=html:htmlcov/neutrino_slow \
         tests/
 
-    # Save neutrino slow coverage
-    if [ -f .coverage ]; then
-        cp .coverage .coverage.neutrino_slow
+    # Coverage file already saved with correct name
+    if [ -f .coverage.neutrino_slow ]; then
         COVERAGE_FILES+=(".coverage.neutrino_slow")
         log_info "Saved neutrino coinjoin test coverage"
     else
@@ -368,15 +382,29 @@ main() {
     if [ ${#COVERAGE_FILES[@]} -gt 0 ]; then
         log_info "=== Combining Coverage Reports ==="
 
-        # Combine all coverage files
-        coverage combine "${COVERAGE_FILES[@]}"
+        # Filter out missing coverage files
+        EXISTING_COVERAGE_FILES=()
+        for cov_file in "${COVERAGE_FILES[@]}"; do
+            if [ -f "$cov_file" ]; then
+                EXISTING_COVERAGE_FILES+=("$cov_file")
+            else
+                log_warning "Coverage file not found: $cov_file"
+            fi
+        done
 
-        # Generate combined reports
-        coverage report --skip-covered
-        coverage html -d htmlcov/combined
-        coverage xml -o coverage.xml
+        if [ ${#EXISTING_COVERAGE_FILES[@]} -gt 0 ]; then
+            # Combine all existing coverage files
+            coverage combine "${EXISTING_COVERAGE_FILES[@]}" 2>&1 || log_warning "Coverage combine had warnings"
 
-        log_success "Combined coverage report: htmlcov/combined/index.html"
+            # Generate combined reports
+            coverage report --skip-covered
+            coverage html -d htmlcov/combined
+            coverage xml -o coverage.xml
+
+            log_success "Combined coverage report: htmlcov/combined/index.html"
+        else
+            log_warning "No coverage files found to combine"
+        fi
     fi
 
     echo
@@ -413,11 +441,45 @@ main() {
         log_error "✗ Some test suites failed"
         echo
         log_error "Failed test suites (${#FAILED_TESTS[@]}):"
-        for test in "${FAILED_TESTS[@]}"; do
-            echo "  ✗ $test"
+
+        # Show each failed test suite with its specific failures
+        for i in "${!FAILED_TESTS[@]}"; do
+            echo "  ✗ ${FAILED_TESTS[$i]}"
+
+            # Show failed test details if available
+            for detail in "${FAILED_TEST_DETAILS[@]}"; do
+                if [[ "$detail" == "${FAILED_TESTS[$i]}:|"* ]]; then
+                    # Extract the failure details after the separator
+                    local failures="${detail#*:|}"
+                    if [ -n "$failures" ] && [ "$failures" != "See full output for details" ]; then
+                        echo "      Failed tests:"
+                        echo "$failures" | while IFS= read -r line; do
+                            if [ -n "$line" ]; then
+                                echo "        - $line"
+                            fi
+                        done
+                    fi
+                    break
+                fi
+            done
         done
+
         echo
-        log_info "Check the output above for details on failed tests"
+        log_info "=== Failure Details ==="
+        log_info "To see detailed failure information, check the output above."
+        log_info "Common issues:"
+        echo "  - Docker containers not running: docker compose --profile <profile> up -d"
+        echo "  - Services not ready: Wait longer or check service health"
+        echo "  - Insufficient funds: Run wallet-funder or fund wallets manually"
+        echo "  - Port conflicts: Check for processes using required ports"
+        echo
+        log_info "For complete test output, redirect to a file:"
+        echo "  $0 2>&1 | tee /tmp/test_output.log"
+        echo
+
+        # Clean up temporary test output files
+        rm -f "${TEMP_TEST_OUTPUT}".* 2>/dev/null || true
+
         exit 1
     fi
 }

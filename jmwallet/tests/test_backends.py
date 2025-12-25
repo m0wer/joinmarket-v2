@@ -220,7 +220,7 @@ class TestNeutrinoBackend:
         assert "--connect=peer2:18333" in args
 
 
-@pytest.mark.docker
+@pytest.mark.neutrino
 @pytest.mark.asyncio
 async def test_neutrino_backend_integration():
     """Integration test for NeutrinoBackend (requires running neutrino server)."""
@@ -230,11 +230,12 @@ async def test_neutrino_backend_integration():
     )
 
     try:
-        # Try to connect - fail if not available
+        # Try to connect - skip if not available
         try:
             await backend._api_call("GET", "v1/status")
         except Exception:
-            pytest.fail(
+            await backend.close()
+            pytest.skip(
                 "Neutrino server not available at localhost:8334. "
                 "Start with: docker compose --profile neutrino up -d neutrino"
             )

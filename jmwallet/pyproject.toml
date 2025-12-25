@@ -39,6 +39,15 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --cov=jmwallet --cov-report=html --cov-report=term"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "docker: marks tests requiring any Docker services",
+    "e2e: marks tests requiring Docker e2e profile",
+    "reference: marks tests requiring Docker reference profile",
+    "neutrino: marks tests requiring Docker neutrino profile",
+    "reference_maker: marks tests requiring Docker reference-maker profile",
+    "flaky: marks tests that may fail due to external dependencies",
+]
 
 [tool.mypy]
 python_version = "3.14"
